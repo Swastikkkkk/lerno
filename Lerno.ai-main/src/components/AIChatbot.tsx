@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { api } from "@/lib/api";
 
 const AIChatbot = ({ lessonTitle, lessonContent, currentQuestion }) => {
   const [messages, setMessages] = useState([
@@ -12,10 +12,6 @@ const AIChatbot = ({ lessonTitle, lessonContent, currentQuestion }) => {
   const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef(null);
-  const API_KEY = "AIzaSyDozMc25FJinbbERfCv35CkMLBZ8bKWgZo";
-
-  const genAI = new GoogleGenerativeAI(API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   const [chatHistory, setChatHistory] = useState([]);
 
@@ -30,50 +26,27 @@ const AIChatbot = ({ lessonTitle, lessonContent, currentQuestion }) => {
     const userMessage = { type: "user", text: inputText };
     setMessages((prev) => [...prev, userMessage]);
 
-    const updatedHistory = [
-      ...chatHistory,
-      { role: "user", parts: [{ text: inputText }] },
-    ];
-    setChatHistory(updatedHistory);
-
+    const sent = inputText;
     setInputText("");
     setIsTyping(true);
 
     try {
-      const chat = model.startChat({
-        history: updatedHistory,
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 100,
-        },
+      const { data } = await api.post<{ reply: string }>("/chat", {
+        message: sent,
+        lesson: lessonTitle,
+        content: lessonContent,
+        question: currentQuestion,
+        history: chatHistory,
       });
-
-      // Send message with context about the current lesson
-      const result = await chat.sendMessage(`
-        I'm learning about "${lessonTitle}". 
-        The lesson content is: "${lessonContent}".
-        The current quiz question is: "${currentQuestion}".
-        
-        My question is: ${inputText}
-        
-        Please give me a helpful, educational response that's relevant to what I'm learning.
-      `);
-
-      // Get the response text
-      const responseText = result.response.text();
-
-      // Update chat history with AI response
+      const responseText = data.reply;
       setChatHistory([
-        ...updatedHistory,
-        { role: "model", parts: [{ text: responseText }] },
+        ...chatHistory,
+        { role: "user", text: sent },
+        { role: "model", text: responseText },
       ]);
-
-      // Add AI response to chat UI
       setMessages((prev) => [...prev, { type: "bot", text: responseText }]);
     } catch (error) {
-      console.error("Error with Gemini:", error);
+      console.error("Tutor error:", error);
       setMessages((prev) => [
         ...prev,
         {

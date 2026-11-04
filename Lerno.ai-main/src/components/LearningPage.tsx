@@ -5,65 +5,17 @@ import { AnimatedShinyText } from "@/ui/animated-shiny-text";
 import { cn } from "@/lib/utils";
 import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { getStorage, ref, getDownloadURL, listAll } from "firebase/storage";
-import { initializeApp } from "firebase/app";
-import axios from "axios";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyBhIvBxbGblvV_2Wr4UQ3PyaehwvWi6H3w",
-  authDomain: "lerno-cd286.firebaseapp.com",
-  projectId: "lerno-cd286",
-  storageBucket: "lerno-cd286.firebasestorage.app",
-  messagingSenderId: "995948277315",
-  appId: "1:995948277315:web:340963bb717be5da436ef6",
-};
-const app = initializeApp(firebaseConfig);
-
-const MURF_API_KEY = "ap2_4fda0ed0-fbb8-42d8-8342-0ad8b064361c";
+import { mediaUrl, speak, stopSpeaking, type Scene } from "@/lib/api";
 
 const LearningPage = () => {
   const location = useLocation();
-  const [videoURLs, setVideoURLs] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading] = useState(false);
+  const [murfError] = useState<string | null>(null);
 
-  // For Murf direct audio playback
-  const murfAudioRef = useRef<HTMLAudioElement | null>(null);
-  const [isMurfLoading, setIsMurfLoading] = useState(false);
-  const [murfError, setMurfError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchVideos = async () => {
-      try {
-        setLoading(true);
-        const storage = getStorage(app);
-        const storageRef = ref(storage, "/");
-        const result = await listAll(storageRef);
-        const videoRefs = result.items.filter((item) =>
-          item.name.toLowerCase().endsWith(".mp4")
-        );
-        videoRefs.sort((a, b) => {
-          const sceneA = a.name.match(/_Scene(\d+)\.mp4$/i);
-          const sceneB = b.name.match(/_Scene(\d+)\.mp4$/i);
-          if (sceneA && sceneB) {
-            return parseInt(sceneA[1]) - parseInt(sceneB[1]);
-          }
-          return a.name.localeCompare(b.name);
-        });
-        const urls = await Promise.all(
-          videoRefs.map((videoRef) => getDownloadURL(videoRef))
-        );
-        setVideoURLs(urls);
-        setLoading(false);
-      } catch (error) {
-        console.error("Error fetching videos:", error);
-        setLoading(false);
-      }
-    };
-    fetchVideos();
-  }, []);
-
-  const FetchData = location.state?.responseData || [
+  const FetchData: Scene[] = location.state?.responseData || [
     {
+      scene_number: 1,
+      video_url: null,
       title: "Introduction to Vectors",
       assessment: {
         multiple_choice: {
@@ -87,7 +39,6 @@ const LearningPage = () => {
   );
   const [hasAnswered, setHasAnswered] = useState(false);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
-  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
 
   const currentSlide = FetchData[currentSlideIndex] || FetchData[0];
   const answer = currentSlide.assessment.multiple_choice.choices;
@@ -108,13 +59,6 @@ const LearningPage = () => {
       setCurrentSlideIndex(0);
     }
 
-    if (videoURLs.length > 0) {
-      if (currentVideoIndex < videoURLs.length - 1) {
-        setCurrentVideoIndex((prevIndex) => prevIndex + 1);
-      } else {
-        setCurrentVideoIndex(0);
-      }
-    }
     setSelectedAnswerIndex(null);
     setHasAnswered(false);
   }
@@ -149,88 +93,19 @@ const LearningPage = () => {
     handleNextSlide();
   }
 
-  // --- Murf Autoplay Handler (Strict Cleanup, No Double Audio) ---
+  // Narration: Murf through the backend, browser voice as a fallback.
   useEffect(() => {
-    let cancelled = false;
+    const signal = { cancelled: false };
     let audio: HTMLAudioElement | null = null;
-
-    async function fetchAndPlayMurfAudio() {
-      setIsMurfLoading(true);
-      setMurfError(null);
-
-      // Immediately stop and clear any previous audio
-      if (murfAudioRef.current) {
-        murfAudioRef.current.pause();
-        murfAudioRef.current.currentTime = 0;
-        murfAudioRef.current = null;
-      }
-
-      try {
-        const response = await axios.post(
-          "https://api.murf.ai/v1/speech/generate",
-          {
-            text: currentSlide.narration,
-            voiceId: "en-US-natalie",
-            format: "mp3",
-            channelType: "MONO",
-            sampleRate: 44100,
-          },
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
-              "api-key": MURF_API_KEY,
-            },
-          }
-        );
-
-        if (cancelled) return;
-
-        const audioUrl = response.data.audioFile;
-        if (audioUrl) {
-          audio = new Audio(audioUrl);
-          murfAudioRef.current = audio;
-
-          const playPromise = audio.play();
-          playPromise?.catch(() => {
-            // If autoplay is blocked, play on first user interaction
-            const handleUserInteraction = () => {
-              audio && audio.play();
-              window.removeEventListener("click", handleUserInteraction);
-              window.removeEventListener("keydown", handleUserInteraction);
-            };
-            window.addEventListener("click", handleUserInteraction, {
-              once: true,
-            });
-            window.addEventListener("keydown", handleUserInteraction, {
-              once: true,
-            });
-          });
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setMurfError(
-            "Failed to fetch narration audio from Murf. See console for details."
-          );
-          console.error(e);
-        }
-      }
-      if (!cancelled) setIsMurfLoading(false);
+    if (currentSlide.narration) {
+      speak(currentSlide.narration, signal).then((a) => {
+        if (signal.cancelled) stopSpeaking(a);
+        else audio = a;
+      });
     }
-
-    if (currentSlide.narration) fetchAndPlayMurfAudio();
-
     return () => {
-      cancelled = true;
-      if (audio) {
-        audio.pause();
-        audio.currentTime = 0;
-      }
-      if (murfAudioRef.current) {
-        murfAudioRef.current.pause();
-        murfAudioRef.current.currentTime = 0;
-        murfAudioRef.current = null;
-      }
+      signal.cancelled = true;
+      stopSpeaking(audio);
     };
   }, [currentSlide.narration]);
 
@@ -296,19 +171,24 @@ const LearningPage = () => {
                   </svg>
                   <span>Loading videos...</span>
                 </div>
-              ) : videoURLs.length > 0 ? (
-                <div className="w-auto h-auto">
+              ) : mediaUrl(currentSlide.video_url) ? (
+                <div className="w-full h-full flex items-center justify-center">
                   <video
-                    src={videoURLs[currentVideoIndex]}
+                    src={mediaUrl(currentSlide.video_url) as string}
                     autoPlay
                     muted
                     loop
-                    className="object-contain rounded-lg"
-                    key={videoURLs[currentVideoIndex]}
+                    playsInline
+                    className="max-h-full max-w-full object-contain rounded-lg"
+                    key={currentSlide.video_url}
                   ></video>
                 </div>
               ) : (
-                <div className="text-white/70">No videos found in storage</div>
+                <div className="text-white/70 text-center px-6">
+                  {location.state?.responseData
+                    ? "This scene's animation couldn't be rendered, but the narration and quiz still work."
+                    : "Start from the home page to generate a lesson."}
+                </div>
               )}
             </div>
             <div className="absolute inset-0 pointer-events-none border border-white/5 rounded-xl"></div>

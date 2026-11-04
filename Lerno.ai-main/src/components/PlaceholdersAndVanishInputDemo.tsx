@@ -2,13 +2,15 @@ import React, { useState } from "react";
 import { PlaceholdersAndVanishInput } from "./PlaceholdersAndVanishInput";
 import { SparklesCore } from "../ui/sparkles";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import { generateLesson } from "@/lib/api";
 import { MultiStepLoader } from "@/ui/multi-step-loader";
 
 export default function PlaceholdersAndVanishInputDemo() {
   const navigate = useNavigate();
   const [inputValue, setInputValue] = React.useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [stage, setStage] = useState("");
+  const [error, setError] = useState("");
 
   const placeholders = [
     'I am "audience" teach me this "topic"?',
@@ -18,9 +20,11 @@ export default function PlaceholdersAndVanishInputDemo() {
     "Give a visual explanation of linear transformations in 3D",
   ];
   const loadingStates = [
-    { text: "Finding personalized learning topics..." },
-    { text: "Generating educational content..." },
-    { text: "Preparing your learning experience..." },
+    { text: "Planning the lesson" },
+    { text: "Writing narration and questions" },
+    { text: "Animating each scene with Manim" },
+    { text: "Rendering the videos" },
+    { text: "Almost there, this takes a minute or two" },
   ];
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -29,23 +33,18 @@ export default function PlaceholdersAndVanishInputDemo() {
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!inputValue.trim()) return;
     setIsLoading(true);
+    setError("");
+    setStage("Planning the lesson");
 
     try {
-      const response = await axios.post("http://localhost:3001/input-data", {
-        data: inputValue,
-      });
-      console.log(response.data);
-
+      const job = await generateLesson(inputValue, (j) => setStage(j.stage));
       navigate("/learning", {
-        state: {
-          query: inputValue,
-          responseData: response.data.response.data.scenes,
-        },
+        state: { query: inputValue, topic: job.topic, responseData: job.scenes },
       });
-      console.log(response.data.response.data.scenes);
-    } catch (error) {
-      console.log("The error is " + error);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
       setIsLoading(false);
     }
   };
@@ -72,6 +71,12 @@ export default function PlaceholdersAndVanishInputDemo() {
         onSubmit={onSubmit}
       />
 
+      {error && !isLoading && (
+        <p className="mt-6 text-sm text-red-300/90 max-w-md text-center">{error}</p>
+      )}
+      {isLoading && stage && (
+        <p className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[110] text-sm text-white/70">{stage}</p>
+      )}
       {isLoading && (
         // <div className="mt-6 flex flex-col items-center">
         //   <l-ring-2
@@ -89,8 +94,8 @@ export default function PlaceholdersAndVanishInputDemo() {
         <MultiStepLoader
           loadingStates={loadingStates}
           loading={isLoading}
-          duration={5000}
-          loop={true}
+          duration={12000}
+          loop={false}
         />
       )}
     </div>
