@@ -6,7 +6,8 @@ POST /chat {lesson, question, message, history}
 POST /tts {text}             -> {audio_url} via Murf, or 503 so the browser falls back to speechSynthesis
 GET  /health
 
-Everything an LLM does goes through Gemini (GEMINI_API_KEY). Manim scenes that fail to
+Everything an LLM does goes through Gemini. Visitors bring their own free key (sent as the
+X-Gemini-Key header); GEMINI_API_KEY on the server is only an optional fallback. Manim scenes that fail to
 render are sent back to Gemini with the error, and a guaranteed-safe scene is used as a
 last resort, so a lesson always finishes.
 """
@@ -23,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from google import genai
@@ -40,7 +41,26 @@ JOB_TTL = 3 * 60 * 60          # forget jobs and their videos after 3 hours
 RENDER_TIMEOUT = 150           # seconds per manim run
 FIX_ATTEMPTS = 2
 
-client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
+_clients: dict[str, genai.Client] = {}
+
+
+def client_for(key: str | None) -> genai.Client:
+    key = (key or GEMINI_KEY or "").strip()
+    if not key:
+        raise NeedKey()
+    if key not in _clients:
+        if len(_clients) > 200:
+            _clients.clear()
+        _clients[key] = genai.Client(api_key=key)
+    return _clients[key]
+
+
+class NeedKey(Exception):
+    pass
+
+
+class BadKey(Exception):
+    pass
 render_slots = threading.Semaphore(int(os.getenv("RENDER_SLOTS", "3")))
 pool = ThreadPoolExecutor(max_workers=8)
 jobs: dict[str, dict] = {}
@@ -52,9 +72,8 @@ app.mount("/media", StaticFiles(directory=str(MEDIA)), name="media")
 
 
 # ----------------------------------------------------------------------------- gemini
-def ask(prompt: str, as_json: bool = False, temperature: float = 0.6, max_tokens: int = 4096) -> str:
-    if client is None:
-        raise RuntimeError("GEMINI_API_KEY is not set on the server")
+def ask(prompt: str, key: str | None, as_json: bool = False, temperature: float = 0.6, max_tokens: int = 4096) -> str:
+    client = client_for(key)
     cfg = types.GenerateContentConfig(
         temperature=temperature,
         max_output_tokens=max_tokens,
@@ -67,13 +86,16 @@ def ask(prompt: str, as_json: bool = False, temperature: float = 0.6, max_tokens
             r = client.models.generate_content(model=MODEL, contents=prompt, config=cfg)
             return (r.text or "").strip()
         except Exception as e:  # rate limits and transient 5xx
+            msg = str(e)
+            if "API_KEY_INVALID" in msg or "API key not valid" in msg or "PERMISSION_DENIED" in msg:
+                raise BadKey("That Gemini key was rejected. Check it in Google AI Studio.")
             last = e
-            time.sleep(2 * (attempt + 1))
+            time.sleep(3 * (attempt + 1))
     raise RuntimeError(f"Gemini failed: {last}")
 
 
-def ask_json(prompt: str, **kw) -> dict:
-    text = ask(prompt, as_json=True, **kw)
+def ask_json(prompt: str, key: str | None, **kw) -> dict:
+    text = ask(prompt, key, as_json=True, **kw)
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -202,12 +224,12 @@ def update(job_id: str, **kw):
         jobs[job_id].update(kw)
 
 
-def build_scene(job_id: str, plan: dict, i: int, s: dict) -> dict:
+def build_scene(job_id: str, plan: dict, i: int, s: dict, key: str | None) -> dict:
     n, total = i + 1, len(plan["scenes"])
     cls = f"Scene{n}"
     try:
         d = ask_json(SCENE.format(topic=plan["topic"], audience=plan["audience"], n=n, total=total,
-                                  title=s["title"], idea=s["idea"]), max_tokens=6000)
+                                  title=s["title"], idea=s["idea"]), key, max_tokens=6000)
     except Exception:
         d = {}
     narration = d.get("narration") or s["idea"]
@@ -233,7 +255,7 @@ def build_scene(job_id: str, plan: dict, i: int, s: dict) -> dict:
     while not ok and code and tries < FIX_ATTEMPTS:
         tries += 1
         try:
-            code = clean_code(ask_json(FIX.format(code=code, error=err, cls=cls), temperature=0.3, max_tokens=6000)["code"])
+            code = clean_code(ask_json(FIX.format(code=code, error=err, cls=cls), key, temperature=0.3, max_tokens=6000)["code"])
             ok, err = render(code, cls, out)
         except Exception as e:
             err = str(e)
@@ -248,18 +270,22 @@ def build_scene(job_id: str, plan: dict, i: int, s: dict) -> dict:
     return scene
 
 
-def run_job(job_id: str, req: str):
+def run_job(job_id: str, req: str, key: str | None):
     try:
         update(job_id, status="running", stage="Planning the lesson", progress=0.05)
-        plan = ask_json(PLAN.format(req=req.replace('"', "'")[:500]))
+        plan = ask_json(PLAN.format(req=req.replace('"', "'")[:500]), key)
         plan["scenes"] = [s for s in plan.get("scenes", []) if s.get("title")][:3]
         if not plan["scenes"]:
             raise RuntimeError("Could not plan a lesson for that request. Try rephrasing it.")
         update(job_id, topic=plan.get("topic", req), audience=plan.get("audience", ""),
                stage="Writing and animating scenes", progress=0.2)
-        futures = [pool.submit(build_scene, job_id, plan, i, s) for i, s in enumerate(plan["scenes"])]
+        futures = [pool.submit(build_scene, job_id, plan, i, s, key) for i, s in enumerate(plan["scenes"])]
         scenes = [f.result() for f in futures]
         update(job_id, status="done", stage="Ready", progress=1.0, scenes=scenes)
+    except NeedKey:
+        update(job_id, status="error", stage="Failed", error="Add your Gemini API key to generate lessons.", code="NEED_KEY")
+    except BadKey as e:
+        update(job_id, status="error", stage="Failed", error=str(e), code="BAD_KEY")
     except Exception as e:
         update(job_id, status="error", stage="Failed", error=str(e))
 
@@ -298,21 +324,21 @@ class TtsIn(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "gemini": bool(client), "murf": bool(MURF_KEY), "jobs": len(jobs)}
+    return {"ok": True, "server_key": bool(GEMINI_KEY), "murf": bool(MURF_KEY), "jobs": len(jobs)}
 
 
 @app.post("/generate")
-def generate(body: GenerateIn):
+def generate(body: GenerateIn, x_gemini_key: str | None = Header(default=None)):
     req = body.prompt.strip()
     if not req:
         raise HTTPException(400, "Tell me what you want to learn.")
-    if client is None:
-        raise HTTPException(503, "Server is missing its Gemini key.")
+    if not (x_gemini_key or GEMINI_KEY):
+        raise HTTPException(401, {"code": "NEED_KEY", "message": "Add your Gemini API key to generate lessons."})
     job_id = uuid.uuid4().hex[:12]
     with jobs_lock:
         jobs[job_id] = {"id": job_id, "status": "queued", "stage": "Queued", "progress": 0.0,
                         "prompt": req, "scenes": [], "done_scenes": 0, "created": time.time()}
-    pool.submit(run_job, job_id, req)
+    pool.submit(run_job, job_id, req, x_gemini_key)
     return {"job_id": job_id}
 
 
@@ -326,14 +352,18 @@ def job(job_id: str):
 
 
 @app.post("/chat")
-def chat(body: ChatIn):
+def chat(body: ChatIn, x_gemini_key: str | None = Header(default=None)):
     history = "\n".join(f"{'Student' if h.get('role') == 'user' else 'Tutor'}: {h.get('text', '')}"
                         for h in body.history[-8:])
     prompt = (f"You are a friendly tutor. Lesson: \"{body.lesson}\". Lesson text: \"{body.content}\". "
               f"Current quiz question: \"{body.question}\".\n{history}\nStudent: {body.message}\n"
               "Answer in 2 to 4 short sentences. Don't give away the quiz answer directly; guide them.")
     try:
-        return {"reply": ask(prompt, temperature=0.7, max_tokens=400)}
+        return {"reply": ask(prompt, x_gemini_key, temperature=0.7, max_tokens=400)}
+    except NeedKey:
+        raise HTTPException(401, {"code": "NEED_KEY", "message": "Add your Gemini API key to chat."})
+    except BadKey as e:
+        raise HTTPException(401, {"code": "BAD_KEY", "message": str(e)})
     except Exception:
         raise HTTPException(502, "The tutor is busy, try again in a moment.")
 

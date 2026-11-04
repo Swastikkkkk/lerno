@@ -5,6 +5,29 @@ export const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:7860")
 
 export const api = axios.create({ baseURL: API_URL, timeout: 30000 });
 
+// ---- bring-your-own Gemini key -------------------------------------------------
+const STORE = "lerno_gemini_key";
+export const KEY_EVENT = "lerno:need-key";
+
+export const getKey = () => {
+  try { return localStorage.getItem(STORE) || ""; } catch { return ""; }
+};
+export const setKey = (k: string) => {
+  try { k ? localStorage.setItem(STORE, k) : localStorage.removeItem(STORE); } catch { /* private mode */ }
+};
+export const askForKey = (reason = "") => window.dispatchEvent(new CustomEvent(KEY_EVENT, { detail: reason }));
+
+api.interceptors.request.use((cfg) => {
+  const k = getKey();
+  if (k) cfg.headers.set("X-Gemini-Key", k);
+  return cfg;
+});
+api.interceptors.response.use(undefined, (err) => {
+  const d = err?.response?.data?.detail;
+  if (err?.response?.status === 401 && d?.code) askForKey(d.message);
+  return Promise.reject(err);
+});
+
 export type Scene = {
   scene_number: number;
   title: string;
@@ -42,7 +65,10 @@ export async function generateLesson(prompt: string, onUpdate?: (j: Job) => void
     }
     onUpdate?.(job);
     if (job.status === "done") return job;
-    if (job.status === "error") throw new Error(job.error || "Generation failed");
+    if (job.status === "error") {
+      if ((job as Job & { code?: string }).code) askForKey(job.error);
+      throw new Error(job.error || "Generation failed");
+    }
     if (Date.now() - started > 8 * 60 * 1000) throw new Error("This is taking too long. Try a simpler topic.");
   }
 }
