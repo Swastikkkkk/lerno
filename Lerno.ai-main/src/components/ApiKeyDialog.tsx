@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getKey, setKey, KEY_EVENT } from "@/lib/api";
 
-/** Asks the visitor for their own free Gemini key. Opens on demand or when the API says a key is needed. */
+/** Optional: visitors can add their own free Gemini key for faster lessons. Lerno works without one. */
 export default function ApiKeyDialog() {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
@@ -29,15 +29,15 @@ export default function ApiKeyDialog() {
         }}
         className="fixed bottom-4 right-4 z-[120] rounded-full border border-white/15 bg-neutral-900/90 px-4 py-2 text-xs text-white/70 backdrop-blur hover:text-white"
       >
-        {hasKey ? "Gemini key saved" : "Add Gemini key"}
+        {hasKey ? "Using your Gemini key" : "Free mode · add Gemini key"}
       </button>
 
       {open && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setOpen(false)}>
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-neutral-950 p-6 text-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold">Use your own Gemini key</h3>
+            <h3 className="text-lg font-semibold">Optional: use your own Gemini key</h3>
             <p className="mt-2 text-sm text-white/60">
-              Lerno runs on Google Gemini. Keys are free: create one in{" "}
+              Lerno works without a key on a free open model. For faster, steadier lessons, grab a free key in{" "}
               <a className="text-white underline underline-offset-2" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">
                 Google AI Studio
               </a>{" "}

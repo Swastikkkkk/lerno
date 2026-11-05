@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { PlaceholdersAndVanishInput } from "./PlaceholdersAndVanishInput";
 import { SparklesCore } from "../ui/sparkles";
 import { useNavigate } from "react-router-dom";
-import { generateLesson, getKey, askForKey } from "@/lib/api";
+import { generateLesson } from "@/lib/api";
 import { MultiStepLoader } from "@/ui/multi-step-loader";
 
 export default function PlaceholdersAndVanishInputDemo() {
@@ -34,10 +34,6 @@ export default function PlaceholdersAndVanishInputDemo() {
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
-    if (!getKey()) {
-      askForKey("Add a free Gemini key first, then press enter again.");
-      return;
-    }
     setIsLoading(true);
     setError("");
     setStage("Planning the lesson");

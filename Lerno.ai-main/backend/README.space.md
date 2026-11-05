@@ -8,4 +8,4 @@ app_port: 7860
 pinned: false
 ---
 
-Lerno.ai backend: plans a lesson with Gemini, renders each scene with Manim, serves the videos.
+Lerno.ai backend: plans a lesson with a free LLM (Pollinations, or the visitor's own Gemini key), renders each scene with Manim, serves the videos.

@@ -4,6 +4,7 @@ import { ContainerScroll } from "../ui/container-scroll-animation";
 import { HoverEffect } from "../ui/card-hover-effect";
 import { AceternityButton } from "../ui/aceternity-button";
 import { useNavigate } from "react-router-dom";
+import previewImg from "../assets/lerno01.png";
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -75,7 +76,7 @@ const LandingPage = () => {
           }
         >
           <img
-            src="/src/assets/lerno01.png"
+            src={previewImg}
             height={720}
             width={1400}
             className="mx-auto rounded-2xl object-cover h-full object-left-top"

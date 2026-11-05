@@ -53,9 +53,8 @@ pip install -r requirements.txt
 Create a .env file in the root directory with the following variables:
 
 ```plaintext
-# API Keys
-ANTHROPIC_API_KEY=your_anthropic_api_key
-GEMINI_API_KEY=your_gemini_api_key
+# Optional. Lerno works with no keys (free Pollinations model).
+GEMINI_API_KEY=your_free_gemini_key
 ```
 
 ## Running the Application

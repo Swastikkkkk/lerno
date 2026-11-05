@@ -6,8 +6,9 @@ POST /chat {lesson, question, message, history}
 POST /tts {text}             -> {audio_url} via Murf, or 503 so the browser falls back to speechSynthesis
 GET  /health
 
-Everything an LLM does goes through Gemini. Visitors bring their own free key (sent as the
-X-Gemini-Key header); GEMINI_API_KEY on the server is only an optional fallback. Manim scenes that fail to
+No paid keys anywhere. With no key, the LLM work runs on Pollinations' free anonymous
+OpenAI-compatible API. Visitors can optionally paste their own free Gemini key (X-Gemini-Key header)
+for faster, steadier results; if Gemini hits its free quota we drop back to Pollinations. Manim scenes that fail to
 render are sent back to Gemini with the error, and a guaranteed-safe scene is used as a
 last resort, so a lesson always finishes.
 """
@@ -33,6 +34,9 @@ from pydantic import BaseModel
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+FREE_URL = os.getenv("FREE_LLM_URL", "https://text.pollinations.ai/openai")
+FREE_MODEL = os.getenv("FREE_LLM_MODEL", "openai")
+FREE_TOKEN = os.getenv("POLLINATIONS_TOKEN")  # optional, raises rate limits
 MURF_KEY = os.getenv("MURF_API_KEY")
 MURF_VOICE = os.getenv("MURF_VOICE", "en-US-natalie")
 MEDIA = Path(os.getenv("MEDIA_DIR", "/tmp/lerno-media"))
@@ -71,8 +75,36 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 app.mount("/media", StaticFiles(directory=str(MEDIA)), name="media")
 
 
-# ----------------------------------------------------------------------------- gemini
+# ----------------------------------------------------------------------------- llm
+def ask_free(prompt: str, as_json: bool, temperature: float, max_tokens: int = 4096) -> str:
+    """Pollinations: free, no signup, OpenAI-compatible."""
+    msgs = [{"role": "user", "content": prompt + ("\n\nReply with only the JSON object." if as_json else "")}]
+    # the free model reasons before answering; cap reasoning so it doesn't eat the token budget
+    body = {"model": FREE_MODEL, "messages": msgs, "temperature": temperature, "private": True,
+            "max_tokens": max(max_tokens, 6000) + 2000, "reasoning_effort": "low"}
+    if as_json:
+        body["response_format"] = {"type": "json_object"}
+    headers = {"Content-Type": "application/json"}
+    if FREE_TOKEN:
+        headers["Authorization"] = f"Bearer {FREE_TOKEN}"
+    last = None
+    for attempt in range(4):
+        try:
+            r = requests.post(FREE_URL, json=body, headers=headers, timeout=120)
+            if r.status_code in (400, 429) or r.status_code >= 500:
+                raise RuntimeError(f"HTTP {r.status_code}")
+            r.raise_for_status()
+            return (r.json()["choices"][0]["message"].get("content") or "").strip()
+        except Exception as e:
+            last = e
+            time.sleep(4 * (attempt + 1))
+    raise RuntimeError(f"Free model failed: {last}")
+
+
 def ask(prompt: str, key: str | None, as_json: bool = False, temperature: float = 0.6, max_tokens: int = 4096) -> str:
+    key = (key or GEMINI_KEY or "").strip()
+    if not key:
+        return ask_free(prompt, as_json, temperature, max_tokens)
     client = client_for(key)
     cfg = types.GenerateContentConfig(
         temperature=temperature,
@@ -80,18 +112,18 @@ def ask(prompt: str, key: str | None, as_json: bool = False, temperature: float 
         response_mime_type="application/json" if as_json else "text/plain",
         thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
-    last = None
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             r = client.models.generate_content(model=MODEL, contents=prompt, config=cfg)
             return (r.text or "").strip()
-        except Exception as e:  # rate limits and transient 5xx
+        except Exception as e:
             msg = str(e)
             if "API_KEY_INVALID" in msg or "API key not valid" in msg or "PERMISSION_DENIED" in msg:
-                raise BadKey("That Gemini key was rejected. Check it in Google AI Studio.")
-            last = e
+                raise BadKey("That Gemini key was rejected. Check it in Google AI Studio, or remove it to use the free model.")
+            if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
+                break  # free quota used up, go keyless
             time.sleep(3 * (attempt + 1))
-    raise RuntimeError(f"Gemini failed: {last}")
+    return ask_free(prompt, as_json, temperature, max_tokens)
 
 
 def ask_json(prompt: str, key: str | None, **kw) -> dict:
@@ -133,6 +165,9 @@ Rules for "code":
   VGroup, Brace, SurroundingRectangle, and animations Create, Write, FadeIn, FadeOut, Transform,
   GrowArrow, Indicate, self.wait.
 - No images, SVGs, sounds, external files, updaters, ValueTracker, always_redraw or 3D.
+- Layout: title at the top, diagram centered below it (shift DOWN*0.5), scaled so it fits a 5x4 box.
+  Place every label with .next_to(target, direction, buff=0.2); never put two objects on the same spot.
+  Before showing a new diagram, FadeOut the previous one. Arrange groups with .arrange(...).
 - Keep every object inside the frame (x between -6.5 and 6.5, y between -3.5 and 3.5).
   Text font_size 28 to 40. Title at the top with .to_edge(UP).
 - Total runtime 8 to 14 seconds. End with self.wait(1).
@@ -324,7 +359,7 @@ class TtsIn(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "server_key": bool(GEMINI_KEY), "murf": bool(MURF_KEY), "jobs": len(jobs)}
+    return {"ok": True, "server_key": bool(GEMINI_KEY), "free_llm": FREE_URL, "murf": bool(MURF_KEY), "jobs": len(jobs)}
 
 
 @app.post("/generate")
@@ -332,8 +367,6 @@ def generate(body: GenerateIn, x_gemini_key: str | None = Header(default=None)):
     req = body.prompt.strip()
     if not req:
         raise HTTPException(400, "Tell me what you want to learn.")
-    if not (x_gemini_key or GEMINI_KEY):
-        raise HTTPException(401, {"code": "NEED_KEY", "message": "Add your Gemini API key to generate lessons."})
     job_id = uuid.uuid4().hex[:12]
     with jobs_lock:
         jobs[job_id] = {"id": job_id, "status": "queued", "stage": "Queued", "progress": 0.0,
