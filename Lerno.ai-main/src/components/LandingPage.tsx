@@ -5,7 +5,9 @@ import { HoverEffect } from "../ui/card-hover-effect";
 import { AceternityButton } from "../ui/aceternity-button";
 import { useNavigate } from "react-router-dom";
 import previewImg from "../assets/lerno01.png";
-import NavBar from "./NavBar";
+import AceternityNavbar from "./AceternityNavbar";
+import PricingComponent from "./PricingSection";
+import Footer from "./Footer";
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -48,8 +50,8 @@ const LandingPage = () => {
   ];
 
   return (
-    <div className="bg-black">
-      <NavBar />
+    <div id="home" className="bg-black relative min-h-screen">
+      <AceternityNavbar />
       <WavyBackground className="max-w-4xl mx-auto px-5 pb-40">
         <p className="text-5xl text-white font-bold inter-var text-center">
           Your AI Tutor, Anytime, Anywhere
@@ -90,6 +92,8 @@ const LandingPage = () => {
       <div className="max-w-7xl mx-auto px-8 py-10">
         <HoverEffect items={projects} />
       </div>
+      <PricingComponent />
+      <Footer />
     </div>
   );
 };
