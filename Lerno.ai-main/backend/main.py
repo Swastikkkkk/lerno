@@ -37,6 +37,9 @@ MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 FREE_URL = os.getenv("FREE_LLM_URL", "https://text.pollinations.ai/openai")
 FREE_MODEL = os.getenv("FREE_LLM_MODEL", "openai")
 FREE_TOKEN = os.getenv("POLLINATIONS_TOKEN")  # optional, raises rate limits
+NVIDIA_KEY = os.getenv("NVIDIA_API_KEY")  # free key from build.nvidia.com; used for every visitor when set
+NVIDIA_URL = os.getenv("NVIDIA_URL", "https://integrate.api.nvidia.com/v1/chat/completions")
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
 MURF_KEY = os.getenv("MURF_API_KEY")
 MURF_VOICE = os.getenv("MURF_VOICE", "en-US-natalie")
 MEDIA = Path(os.getenv("MEDIA_DIR", "/tmp/lerno-media"))
@@ -112,9 +115,34 @@ def ask_free(prompt: str, as_json: bool, temperature: float, max_tokens: int = 4
     raise RuntimeError(f"Free model failed: {last}")
 
 
+def ask_nvidia(prompt: str, as_json: bool, temperature: float, max_tokens: int = 4096) -> str:
+    """NVIDIA's free API (Nemotron). OpenAI-compatible; thinking off so the answer comes back fast."""
+    msgs = [{"role": "user", "content": prompt + ("\n\nReply with only the JSON object." if as_json else "")}]
+    body = {"model": NVIDIA_MODEL, "messages": msgs, "temperature": temperature,
+            "max_tokens": max(max_tokens, 6000) + 2000, "chat_template_kwargs": {"enable_thinking": False}}
+    last = None
+    for attempt in range(3):
+        try:
+            r = requests.post(NVIDIA_URL, json=body, headers={"Authorization": f"Bearer {NVIDIA_KEY}"}, timeout=180)
+            if r.status_code == 429 or r.status_code >= 500:
+                raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+            r.raise_for_status()
+            return (r.json()["choices"][0]["message"].get("content") or "").strip()
+        except Exception as e:
+            last = e
+            print(f"nvidia attempt {attempt + 1} failed: {e}", flush=True)
+            time.sleep(5 * (attempt + 1))
+    raise RuntimeError(f"NVIDIA failed: {last}")
+
+
 def ask(prompt: str, key: str | None, as_json: bool = False, temperature: float = 0.6, max_tokens: int = 4096) -> str:
     key = (key or GEMINI_KEY or "").strip()
     if not key:
+        if NVIDIA_KEY:
+            try:
+                return ask_nvidia(prompt, as_json, temperature, max_tokens)
+            except Exception as e:
+                print(f"nvidia unavailable, trying the free model: {e}", flush=True)
         return ask_free(prompt, as_json, temperature, max_tokens)
     client = client_for(key)
     cfg = types.GenerateContentConfig(
@@ -375,7 +403,7 @@ class TtsIn(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "server_key": bool(GEMINI_KEY), "free_llm": FREE_URL, "murf": bool(MURF_KEY), "jobs": len(jobs)}
+    return {"ok": True, "server_key": bool(GEMINI_KEY), "nvidia": bool(NVIDIA_KEY), "free_llm": FREE_URL, "murf": bool(MURF_KEY), "jobs": len(jobs)}
 
 
 @app.post("/generate")
