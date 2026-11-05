@@ -688,6 +688,14 @@ def chat(body: ChatIn, x_gemini_key: str | None = Header(default=None)):
         raise HTTPException(502, "The tutor is busy, try again in a moment.")
 
 
+def llm_translate(texts: list[str], language: str) -> list[str]:
+    prompt = (f"Translate each string in this JSON array into {language}. Keep numbers, code and technical "
+              f"terms like node, head, tail as they are. Return JSON {{\"texts\": [...]}} with the same order "
+              f"and length.\n{json.dumps(texts, ensure_ascii=False)}")
+    out = ask_json(prompt, None, temperature=0.2, max_tokens=3000).get("texts") or []
+    return [str(o) for o in out][:len(texts)] + texts[len(out):]
+
+
 @app.get("/languages")
 def languages():
     return [{"code": k, "name": v[0], "native": v[1]} for k, v in LANGS.items()]
@@ -705,11 +713,15 @@ def translate(body: TranslateIn):
             r = requests.post("https://api.murf.ai/v1/text/translate",
                               headers={"api-key": MURF_KEY, "Content-Type": "application/json"},
                               json={"targetLanguage": body.lang, "texts": todo}, timeout=60)
-            r.raise_for_status()
-            for src, item in zip(todo, r.json().get("translations", [])):
-                _translations[(body.lang, src)] = item.get("translated_text") or src
+            if r.status_code == 400:  # Murf can't translate into this language; use the LLM instead
+                out = llm_translate(todo, LANGS[body.lang][0])
+            else:
+                r.raise_for_status()
+                out = [item.get("translated_text") or src for src, item in zip(todo, r.json().get("translations", []))]
+            for src, t in zip(todo, out):
+                _translations[(body.lang, src)] = t or src
         except Exception as e:
-            print(f"murf translate failed: {e}", flush=True)
+            print(f"translate failed: {e}", flush=True)
             raise HTTPException(503, "Translation unavailable right now")
     if len(_translations) > 5000:
         _translations.clear()

@@ -115,24 +115,31 @@ export async function translate(texts: string[], lang: string): Promise<string[]
 }
 
 /** Speak text with Murf through the backend; fall back to the browser's own voice. */
+function browserVoice(text: string, lang: string) {
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang;
+  u.rate = 1;
+  window.speechSynthesis.speak(u);
+}
+
 export async function speak(text: string, signal: { cancelled: boolean }, lang = "en-IN"): Promise<HTMLAudioElement | null> {
   try {
     const { data } = await api.post<{ audio_url: string }>("/tts", { text, lang }, { timeout: 45000 });
     if (signal.cancelled) return null;
-    const audio = new Audio(data.audio_url);
-    await audio.play().catch(() => {
-      const resume = () => audio.play();
+    const audio = new Audio(data.audio_url.startsWith("/") ? `${API_URL}${data.audio_url}` : data.audio_url);
+    // the file couldn't load: read it with the browser voice instead of staying silent
+    audio.addEventListener("error", () => { if (!signal.cancelled) browserVoice(text, lang); }, { once: true });
+    await audio.play().catch((e: DOMException) => {
+      if (e?.name !== "NotAllowedError") return; // load errors are handled above
+      const resume = () => { audio.play().catch(() => browserVoice(text, lang)); };
       window.addEventListener("click", resume, { once: true });
       window.addEventListener("keydown", resume, { once: true });
     });
     return audio;
   } catch {
-    if (signal.cancelled || !("speechSynthesis" in window)) return null;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = lang;
-    u.rate = 1;
-    window.speechSynthesis.speak(u);
+    if (!signal.cancelled) browserVoice(text, lang);
     return null;
   }
 }
