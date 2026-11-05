@@ -46,6 +46,7 @@ RENDER_TIMEOUT = 150           # seconds per manim run
 FIX_ATTEMPTS = 2
 
 _clients: dict[str, genai.Client] = {}
+free_slots = threading.Semaphore(int(os.getenv("FREE_LLM_SLOTS", "1")))  # anonymous tier allows ~1 request at a time
 
 
 def client_for(key: str | None) -> genai.Client:
@@ -64,6 +65,10 @@ class NeedKey(Exception):
 
 
 class BadKey(Exception):
+    pass
+
+
+class FreeQuota(Exception):
     pass
 render_slots = threading.Semaphore(int(os.getenv("RENDER_SLOTS", "3")))
 pool = ThreadPoolExecutor(max_workers=8)
@@ -90,14 +95,20 @@ def ask_free(prompt: str, as_json: bool, temperature: float, max_tokens: int = 4
     last = None
     for attempt in range(4):
         try:
-            r = requests.post(FREE_URL, json=body, headers=headers, timeout=120)
+            with free_slots:
+                r = requests.post(FREE_URL, json=body, headers=headers, timeout=150)
+            if r.status_code == 402:
+                raise FreeQuota("The free model is out of quota right now. Add a free Gemini key to keep going.")
             if r.status_code in (400, 429) or r.status_code >= 500:
-                raise RuntimeError(f"HTTP {r.status_code}")
+                raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
             r.raise_for_status()
             return (r.json()["choices"][0]["message"].get("content") or "").strip()
+        except FreeQuota:
+            raise
         except Exception as e:
             last = e
-            time.sleep(4 * (attempt + 1))
+            print(f"free llm attempt {attempt + 1} failed: {e}", flush=True)
+            time.sleep(5 * (attempt + 1))
     raise RuntimeError(f"Free model failed: {last}")
 
 
@@ -265,7 +276,10 @@ def build_scene(job_id: str, plan: dict, i: int, s: dict, key: str | None) -> di
     try:
         d = ask_json(SCENE.format(topic=plan["topic"], audience=plan["audience"], n=n, total=total,
                                   title=s["title"], idea=s["idea"]), key, max_tokens=6000)
-    except Exception:
+    except FreeQuota:
+        raise
+    except Exception as e:
+        print(f"scene {n} generation failed: {e}", flush=True)
         d = {}
     narration = d.get("narration") or s["idea"]
     choices = [str(c) for c in (d.get("choices") or [])][:4]
@@ -319,6 +333,8 @@ def run_job(job_id: str, req: str, key: str | None):
         update(job_id, status="done", stage="Ready", progress=1.0, scenes=scenes)
     except NeedKey:
         update(job_id, status="error", stage="Failed", error="Add your Gemini API key to generate lessons.", code="NEED_KEY")
+    except FreeQuota as e:
+        update(job_id, status="error", stage="Failed", error=str(e), code="NEED_KEY")
     except BadKey as e:
         update(job_id, status="error", stage="Failed", error=str(e), code="BAD_KEY")
     except Exception as e:
@@ -393,8 +409,8 @@ def chat(body: ChatIn, x_gemini_key: str | None = Header(default=None)):
               "Answer in 2 to 4 short sentences. Don't give away the quiz answer directly; guide them.")
     try:
         return {"reply": ask(prompt, x_gemini_key, temperature=0.7, max_tokens=400)}
-    except NeedKey:
-        raise HTTPException(401, {"code": "NEED_KEY", "message": "Add your Gemini API key to chat."})
+    except (NeedKey, FreeQuota):
+        raise HTTPException(401, {"code": "NEED_KEY", "message": "The free model is busy. Add a free Gemini key to chat."})
     except BadKey as e:
         raise HTTPException(401, {"code": "BAD_KEY", "message": str(e)})
     except Exception:
