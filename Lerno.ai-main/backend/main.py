@@ -41,7 +41,7 @@ FREE_TOKEN = os.getenv("POLLINATIONS_TOKEN")  # optional, raises rate limits
 NVIDIA_KEY = os.getenv("NVIDIA_API_KEY")  # free key from build.nvidia.com; used for every visitor when set
 NVIDIA_URL = os.getenv("NVIDIA_URL", "https://integrate.api.nvidia.com/v1/chat/completions")
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
-MURF_KEY = os.getenv("MURF_API_KEY")
+MURF_KEY = (os.getenv("MURF_API_KEY") or "").strip().strip('"').strip("'") or None
 MURF_VOICE = os.getenv("MURF_VOICE", "en-IN-nikhil")
 MURF_MODEL = os.getenv("MURF_MODEL", "FALCON")
 MEDIA = Path(os.getenv("MEDIA_DIR", "/tmp/lerno-media"))
@@ -672,7 +672,8 @@ def tts(body: TtsIn):
                               headers={"api-key": MURF_KEY, "Content-Type": "application/json"},
                               json={"text": text, "voiceId": MURF_VOICE, "model": MURF_MODEL, "format": "MP3"},
                               timeout=60)
-            r.raise_for_status()
+            if r.status_code != 200:
+                raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]} (key len {len(MURF_KEY)}, starts {MURF_KEY[:4]})")
             if "audio" not in r.headers.get("content-type", "") or not r.content:
                 raise ValueError("no audio")
             out.parent.mkdir(parents=True, exist_ok=True)
