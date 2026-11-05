@@ -7,10 +7,10 @@ import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { mediaUrl, speak, stopSpeaking, translate, getLang, LANG_EVENT, type Scene } from "@/lib/api";
 import LanguagePicker from "./LanguagePicker";
+import LessonPlayer from "./LessonPlayer";
 
 const LearningPage = () => {
   const location = useLocation();
-  const [loading] = useState(false);
   const [murfError] = useState<string | null>(null);
 
   const FetchData: Scene[] = location.state?.responseData || [
@@ -114,14 +114,16 @@ const LearningPage = () => {
     handleNextSlide();
   }
 
+  const [narration, setNarration] = useState<HTMLAudioElement | null>(null);
   // Narration: Murf through the backend, browser voice as a fallback.
   useEffect(() => {
     const signal = { cancelled: false };
     let audio: HTMLAudioElement | null = null;
+    setNarration(null);
     if (shown.key === slideKey && shown.narration) {
       speak(shown.narration, signal, lang).then((a) => {
         if (signal.cancelled) stopSpeaking(a);
-        else audio = a;
+        else { audio = a; setNarration(a); }
       });
     }
     return () => {
@@ -166,55 +168,19 @@ const LearningPage = () => {
         >
           {/* Box 1: Video */}
           <div className="relative group overflow-hidden rounded-xl border border-white/10 md:col-span-2 h-72 md:h-full md:min-h-0 bg-zinc-900/50 backdrop-blur-sm transition-all duration-300 hover:border-white/30 hover:bg-zinc-900/70">
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/20 via-purple-500/20 to-pink-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+
             <div className="absolute inset-0 bg-grid-white/[0.02] bg-[size:20px_20px]"></div>
             <div className="h-full w-full flex items-center justify-center p-2">
-              {loading ? (
-                <div className="text-white/70 flex flex-col items-center">
-                  <svg
-                    className="animate-spin h-10 w-10 text-white/30 mb-3"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    ></circle>
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    ></path>
-                  </svg>
-                  <span>Loading videos...</span>
-                </div>
-              ) : mediaUrl(currentSlide.video_url) ? (
-                <div className="w-full h-full flex items-center justify-center">
-                  <video
-                    src={mediaUrl(currentSlide.video_url) as string}
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    className="max-h-full max-w-full object-contain rounded-lg"
-                    key={currentSlide.video_url}
-                  ></video>
-                </div>
-              ) : (
-                <div className="text-white/70 text-center px-6">
-                  {location.state?.responseData
-                    ? "This scene's animation couldn't be rendered, but the narration and quiz still work."
-                    : "Start from the home page to generate a lesson."}
-                </div>
-              )}
+              <LessonPlayer
+                src={mediaUrl(currentSlide.video_url)}
+                audio={narration}
+                captions={shown.narration}
+                emptyText={location.state?.responseData
+                  ? "This scene's animation couldn't be rendered, but the narration and quiz still work."
+                  : "Start from the home page to generate a lesson."}
+              />
             </div>
             <div className="absolute inset-0 pointer-events-none border border-white/5 rounded-xl"></div>
-            <div className="absolute -inset-px bg-gradient-to-r from-purple-500/30 via-transparent to-cyan-500/30 rounded-xl opacity-0 group-hover:opacity-100 blur-xl transition-opacity duration-500"></div>
           </div>
 
           {/* Narration Box */}
