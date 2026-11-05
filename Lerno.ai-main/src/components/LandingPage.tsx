@@ -5,6 +5,7 @@ import { HoverEffect } from "../ui/card-hover-effect";
 import { AceternityButton } from "../ui/aceternity-button";
 import { useNavigate } from "react-router-dom";
 import previewImg from "../assets/lerno01.png";
+import NavBar from "./NavBar";
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -48,7 +49,8 @@ const LandingPage = () => {
 
   return (
     <div className="bg-black">
-      <WavyBackground className="max-w-4xl mx-auto pb-40">
+      <NavBar />
+      <WavyBackground className="max-w-4xl mx-auto px-5 pb-40">
         <p className="text-5xl text-white font-bold inter-var text-center">
           Your AI Tutor, Anytime, Anywhere
         </p>
@@ -62,7 +64,7 @@ const LandingPage = () => {
           </AceternityButton>
         </div>
       </WavyBackground>
-      <div className="flex flex-col overflow-hidden">
+      <div id="about" className="flex flex-col overflow-hidden scroll-mt-24">
         <ContainerScroll
           titleComponent={
             <>
@@ -84,7 +86,7 @@ const LandingPage = () => {
           />
         </ContainerScroll>
       </div>
-      <h2 className="text-white text-center text-3xl font-bold">Features</h2>
+      <h2 id="features" className="text-white text-center text-3xl font-bold scroll-mt-28">Features</h2>
       <div className="max-w-7xl mx-auto px-8 py-10">
         <HoverEffect items={projects} />
       </div>
