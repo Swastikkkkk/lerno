@@ -22,11 +22,6 @@ api.interceptors.request.use((cfg) => {
   if (k) cfg.headers.set("X-Gemini-Key", k);
   return cfg;
 });
-api.interceptors.response.use(undefined, (err) => {
-  const d = err?.response?.data?.detail;
-  if (err?.response?.status === 401 && d?.code) askForKey(d.message);
-  return Promise.reject(err);
-});
 
 export type Scene = {
   scene_number: number;
@@ -66,7 +61,6 @@ export async function generateLesson(prompt: string, onUpdate?: (j: Job) => void
     onUpdate?.(job);
     if (job.status === "done") return job;
     if (job.status === "error") {
-      if ((job as Job & { code?: string }).code) askForKey(job.error);
       throw new Error(job.error || "Generation failed");
     }
     if (Date.now() - started > 8 * 60 * 1000) throw new Error("This is taking too long. Try a simpler topic.");

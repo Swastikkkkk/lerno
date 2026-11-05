@@ -12,7 +12,6 @@ import PlaceholdersAndVanishInputDemo from "./components/PlaceholdersAndVanishIn
 import "./App.css";
 import LearningPage from "./components/LearningPage.tsx";
 import LandingPage from "./components/LandingPage.tsx";
-import ApiKeyDialog from "./components/ApiKeyDialog";
 
 const router = createBrowserRouter(
   createRoutesFromElements(
@@ -29,7 +28,6 @@ createRoot(document.getElementById("root")!).render(
     {/* <App /> */}
     <>
       <RouterProvider router={router} />
-      <ApiKeyDialog />
     </>
   </StrictMode>
 );

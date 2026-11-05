@@ -110,8 +110,8 @@ const LearningPage = () => {
   }, [currentSlide.narration]);
 
   return (
-    <div className="flex flex-col items-center justify-center w-full min-h-screen bg-black p-4 md:p-8">
-      <div className="z-10 flex mb-8">
+    <div className="flex flex-col items-center w-full min-h-screen md:h-screen md:overflow-hidden bg-black p-4 md:p-6">
+      <div className="z-10 flex mb-4 md:mb-5 shrink-0">
         <div
           className={cn(
             "group rounded-full border border-black/5 bg-neutral-900 text-base transition-all ease-in hover:cursor-pointer hover:bg-neutral-800 shadow-lg"
@@ -140,10 +140,10 @@ const LearningPage = () => {
           initial="hidden"
           animate="visible"
           exit="exit"
-          className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 w-full max-w-6xl"
+          className="grid grid-cols-1 md:grid-cols-3 md:grid-rows-[minmax(0,3fr)_minmax(0,2fr)] gap-4 md:gap-5 w-full max-w-6xl md:flex-1 md:min-h-0"
         >
           {/* Box 1: Video */}
-          <div className="relative group overflow-hidden rounded-xl border border-white/10 md:col-span-2 h-72 md:h-96 bg-zinc-900/50 backdrop-blur-sm transition-all duration-300 hover:border-white/30 hover:bg-zinc-900/70">
+          <div className="relative group overflow-hidden rounded-xl border border-white/10 md:col-span-2 h-72 md:h-full md:min-h-0 bg-zinc-900/50 backdrop-blur-sm transition-all duration-300 hover:border-white/30 hover:bg-zinc-900/70">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/20 via-purple-500/20 to-pink-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
             <div className="absolute inset-0 bg-grid-white/[0.02] bg-[size:20px_20px]"></div>
             <div className="h-full w-full flex items-center justify-center p-2">
@@ -196,7 +196,7 @@ const LearningPage = () => {
           </div>
 
           {/* Narration Box */}
-          <div className="relative group overflow-hidden rounded-xl border border-white/10 p-6 h-72 md:h-96 bg-zinc-900/50 backdrop-blur-sm transition-all duration-300 hover:border-white/30 hover:bg-zinc-900/70">
+          <div className="relative group overflow-hidden rounded-xl border border-white/10 p-6 h-72 md:h-full md:min-h-0 bg-zinc-900/50 backdrop-blur-sm transition-all duration-300 hover:border-white/30 hover:bg-zinc-900/70">
             <div className="absolute inset-0 bg-gradient-to-br from-green-500/20 via-emerald-500/20 to-teal-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
             <div className="absolute inset-0 bg-grid-white/[0.02] bg-[size:20px_20px]"></div>
             <div className="relative z-10 h-full flex flex-col">
@@ -232,59 +232,7 @@ const LearningPage = () => {
                   </div>
                 )}
               </motion.div>
-            </div>
-            <div className="absolute -inset-px bg-gradient-to-r from-green-500/30 via-transparent to-emerald-500/30 rounded-xl opacity-0 group-hover:opacity-100 blur-xl transition-opacity duration-500"></div>
-          </div>
-          {/* Box 2: MCQ Question & Answers */}
-          <div className="relative group overflow-hidden rounded-xl border border-white/10 p-4 min-h-[18rem] h-auto bg-zinc-900/50 backdrop-blur-sm transition-all duration-300 hover:border-white/30 hover:bg-zinc-900/70">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 via-purple-500/20 to-cyan-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-            <div className="absolute inset-0 bg-grid-white/[0.02] bg-[size:20px_20px]"></div>
-            <div className="relative z-10 flex flex-col h-full">
-              <h3 className="text-xl font-medium text-white mb-3">Question</h3>
-              <p className="text-white/70 mb-4">{question}</p>
-              <div className="space-y-3 flex-grow">
-                {answer.map((info: string, index: number) => (
-                  <motion.button
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{
-                      duration: 0.3,
-                      delay: index * 0.1,
-                    }}
-                    className={`w-full text-left px-4 py-2.5 rounded-lg border ${
-                      selectedAnswerIndex === index &&
-                      correctAnswerIndex === index
-                        ? "bg-green-500/30 border-green-500/50 text-white"
-                        : selectedAnswerIndex === index
-                        ? "bg-red-500/30 border-red-500/50 text-white"
-                        : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:border-white/20"
-                    } transition-all duration-200 ${
-                      hasAnswered && "cursor-default"
-                    }`}
-                    onClick={() => !hasAnswered && handleAnswerClick(index)}
-                    key={index}
-                    disabled={hasAnswered}
-                  >
-                    {info}
-                  </motion.button>
-                ))}
-              </div>
-            </div>
-            <div className="absolute -inset-px bg-gradient-to-r from-blue-500/30 via-transparent to-purple-500/30 rounded-xl opacity-0 group-hover:opacity-100 blur-xl transition-opacity duration-500"></div>
-          </div>
-          {/* Box 3: AI Chatbot */}
-          <div className="md:col-span-1 h-full">
-            <AIChatbot
-              lessonTitle={currentSlide.title}
-              lessonContent={currentSlide.narration}
-              currentQuestion={currentSlide.assessment.multiple_choice.question}
-            />
-          </div>
-          {/* Box 4: Next button */}
-          <div className="relative group overflow-hidden rounded-xl border border-white/10 p-6 bg-zinc-900/50 backdrop-blur-sm transition-all duration-300 hover:border-white/30 hover:bg-zinc-900/70">
-            <div className="absolute inset-0 bg-gradient-to-br from-amber-500/20 via-orange-500/20 to-rose-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-            <div className="absolute inset-0 bg-grid-white/[0.02] bg-[size:20px_20px]"></div>
-            <div className="h-full w-full flex items-center justify-center relative z-10">
+              <div className="pt-4 flex justify-end shrink-0">
               <HoverBorderGradient
                 containerClassName={`rounded-full ${
                   !hasAnswered && "opacity-50 pointer-events-none"
@@ -309,8 +257,54 @@ const LearningPage = () => {
                   />
                 </svg>
               </HoverBorderGradient>
+              </div>
             </div>
-            <div className="absolute -inset-px bg-gradient-to-r from-amber-500/30 via-transparent to-rose-500/30 rounded-xl opacity-0 group-hover:opacity-100 blur-xl transition-opacity duration-500"></div>
+            <div className="absolute -inset-px bg-gradient-to-r from-green-500/30 via-transparent to-emerald-500/30 rounded-xl opacity-0 group-hover:opacity-100 blur-xl transition-opacity duration-500"></div>
+          </div>
+          {/* Box 2: MCQ Question & Answers */}
+          <div className="relative group overflow-hidden rounded-xl border border-white/10 md:col-span-2 p-5 min-h-[18rem] md:min-h-0 md:h-full bg-zinc-900/50 backdrop-blur-sm transition-all duration-300 hover:border-white/30 hover:bg-zinc-900/70">
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 via-purple-500/20 to-cyan-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+            <div className="absolute inset-0 bg-grid-white/[0.02] bg-[size:20px_20px]"></div>
+            <div className="relative z-10 flex flex-col h-full">
+              <h3 className="text-lg font-medium text-white mb-2">Question</h3>
+              <p className="text-white/80 mb-4">{question}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 content-start flex-grow min-h-0 overflow-y-auto pr-1">
+                {answer.map((info: string, index: number) => (
+                  <motion.button
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      duration: 0.3,
+                      delay: index * 0.1,
+                    }}
+                    className={`w-full h-full text-left px-4 py-3 text-sm rounded-lg border ${
+                      selectedAnswerIndex === index &&
+                      correctAnswerIndex === index
+                        ? "bg-green-500/30 border-green-500/50 text-white"
+                        : selectedAnswerIndex === index
+                        ? "bg-red-500/30 border-red-500/50 text-white"
+                        : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:border-white/20"
+                    } transition-all duration-200 ${
+                      hasAnswered && "cursor-default"
+                    }`}
+                    onClick={() => !hasAnswered && handleAnswerClick(index)}
+                    key={index}
+                    disabled={hasAnswered}
+                  >
+                    {info}
+                  </motion.button>
+                ))}
+              </div>
+            </div>
+            <div className="absolute -inset-px bg-gradient-to-r from-blue-500/30 via-transparent to-purple-500/30 rounded-xl opacity-0 group-hover:opacity-100 blur-xl transition-opacity duration-500"></div>
+          </div>
+          {/* Box 3: AI Chatbot */}
+          <div className="md:col-span-1 h-96 md:h-full md:min-h-0">
+            <AIChatbot
+              lessonTitle={currentSlide.title}
+              lessonContent={currentSlide.narration}
+              currentQuestion={currentSlide.assessment.multiple_choice.question}
+            />
           </div>
         </motion.div>
       </AnimatePresence>

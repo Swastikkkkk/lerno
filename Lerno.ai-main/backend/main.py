@@ -12,6 +12,7 @@ for faster, steadier results; if Gemini hits its free quota we drop back to Poll
 render are sent back to Gemini with the error, and a guaranteed-safe scene is used as a
 last resort, so a lesson always finishes.
 """
+import hashlib
 import json
 import os
 import re
@@ -41,7 +42,8 @@ NVIDIA_KEY = os.getenv("NVIDIA_API_KEY")  # free key from build.nvidia.com; used
 NVIDIA_URL = os.getenv("NVIDIA_URL", "https://integrate.api.nvidia.com/v1/chat/completions")
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
 MURF_KEY = os.getenv("MURF_API_KEY")
-MURF_VOICE = os.getenv("MURF_VOICE", "en-US-natalie")
+MURF_VOICE = os.getenv("MURF_VOICE", "en-IN-nikhil")
+MURF_MODEL = os.getenv("MURF_MODEL", "FALCON")
 MEDIA = Path(os.getenv("MEDIA_DIR", "/tmp/lerno-media"))
 MEDIA.mkdir(parents=True, exist_ok=True)
 JOB_TTL = 3 * 60 * 60          # forget jobs and their videos after 3 hours
@@ -101,7 +103,7 @@ def ask_free(prompt: str, as_json: bool, temperature: float, max_tokens: int = 4
             with free_slots:
                 r = requests.post(FREE_URL, json=body, headers=headers, timeout=150)
             if r.status_code == 402:
-                raise FreeQuota("The free model is out of quota right now. Add a free Gemini key to keep going.")
+                raise FreeQuota("Lerno is busy right now. Try again in a minute.")
             if r.status_code in (400, 429) or r.status_code >= 500:
                 raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
             r.raise_for_status()
@@ -165,15 +167,34 @@ def ask(prompt: str, key: str | None, as_json: bool = False, temperature: float 
     return ask_free(prompt, as_json, temperature, max_tokens)
 
 
-def ask_json(prompt: str, key: str | None, **kw) -> dict:
-    text = ask(prompt, key, as_json=True, **kw)
+def _loads(text: str) -> dict:
+    m = re.search(r"\{.*\}", text, re.S)
+    body = m.group(0) if m else text
+    # \frac, \text, \times... are valid-looking JSON escapes (\f, \t, \b, \r) that would eat the LaTeX
+    body = re.sub(r"(?<!\\)\\(?=(?:frac|tfrac|dfrac|text|times|theta|tau|top|beta|bmod|binom|bar|rightarrow|rho|rangle|bf)(?![a-z]))",
+                  r"\\\\", body)
     try:
-        return json.loads(text)
+        return json.loads(body)
     except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
-            raise
-        return json.loads(m.group(0))
+        # LaTeX like \frac inside a JSON string is an invalid escape; double any lone backslash
+        return json.loads(re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", body))
+
+
+def split_scene(raw: str) -> dict:
+    """Scene replies are a JSON object followed by a ```python block; tolerate the old all-JSON shape too."""
+    code_m = re.search(r"```(?:python)?\s*(.*?)```", raw, re.S)
+    meta_part = raw[:code_m.start()] if code_m else raw
+    try:
+        d = _loads(meta_part)
+    except Exception:
+        d = {}
+    if code_m:
+        d["code"] = code_m.group(1)
+    return d
+
+
+def ask_json(prompt: str, key: str | None, **kw) -> dict:
+    return _loads(ask(prompt, key, as_json=True, **kw))
 
 
 # ----------------------------------------------------------------------------- prompts
@@ -191,26 +212,33 @@ Return JSON:
 SCENE = """You are writing one scene of an animated lesson about "{topic}" for a {audience}.
 Scene {n} of {total}: "{title}". What it shows: {idea}
 
-Return JSON with:
-- "narration": 2 to 4 friendly sentences a narrator reads while the animation plays.
-- "question": one multiple choice question that checks this scene.
-- "choices": exactly 4 short answer options, plain text, no letters in front.
-- "correct_index": index (0-3) of the right option.
-- "code": a complete Manim Community v0.19 Python file.
+Reply in exactly two parts:
+1. A JSON object with:
+   "narration": 2 to 4 friendly sentences a narrator reads while the animation plays,
+   "question": one multiple choice question that checks this scene,
+   "choices": exactly 4 short answer options, plain text, no letters in front,
+   "correct_index": index (0-3) of the right option.
+2. Then the complete Manim Community v0.19 Python file in a ```python code block (NOT inside the JSON).
 
 Rules for "code":
-- Start with `from manim import *` and define exactly one class `Scene{n}(Scene)` with `construct`.
-- Use only: Text, MathTex, Circle, Square, Rectangle, Dot, Line, Arrow, Vector, NumberPlane, Axes,
-  VGroup, Brace, SurroundingRectangle, and animations Create, Write, FadeIn, FadeOut, Transform,
+- Start with `from manim import *` and define exactly one class `Scene{n}(LernoScene)` with `construct`.
+- LAYOUT IS HANDLED FOR YOU. Use these helpers, never position text by hand:
+    self.set_title("Short title")                      # top strip
+    d = VGroup(...).arrange(RIGHT, buff=0.8)            # build the diagram as ONE VGroup, centered at ORIGIN
+    self.show(d)                                        # fits and centers it, animates Create
+    self.label(d[2], "New tail", DOWN)                 # short label next to an object; it finds a free side
+    self.label(d[3], r"k=2", UP, tex=True)
+    self.note(r"k \bmod n = 2")                        # formulas go to the bottom row (max 3)
+    self.clear_labels()
+  Animate changes with self.play(...) on parts of d (Indicate, Transform, d[i].animate.set_color(...), GrowArrow).
+- Labels: 1 to 4 words each, at most 4 per scene. Formulas only through self.note.
+- Use only: Text, MathTex, Circle, Square, Rectangle, RoundedRectangle, Dot, Line, Arrow, Vector, NumberPlane,
+  Axes, VGroup, Brace, SurroundingRectangle, and animations Create, Write, FadeIn, FadeOut, Transform,
   GrowArrow, Indicate, self.wait.
 - No images, SVGs, sounds, external files, updaters, ValueTracker, always_redraw or 3D.
-- Layout: title at the top, diagram centered below it (shift DOWN*0.5), scaled so it fits a 5x4 box.
-  Place every label with .next_to(target, direction, buff=0.2); never put two objects on the same spot.
-  Before showing a new diagram, FadeOut the previous one. Arrange groups with .arrange(...).
-- Keep every object inside the frame (x between -6.5 and 6.5, y between -3.5 and 3.5).
-  Text font_size 28 to 40. Title at the top with .to_edge(UP).
+- Plain ASCII inside Text(). In MathTex wrap words in \\text{{}}, e.g. r"\\text{{new tail}}.next = \\text{{null}}".
+- Make the diagram big and clear: few, large shapes (circles radius 0.5+, squares side 0.8+), font_size 32+ inside shapes.
 - Total runtime 8 to 14 seconds. End with self.wait(1).
-- Plain ASCII inside Text(). Use MathTex only for simple formulas.
 """
 
 FIX = """This Manim Community v0.19 file failed to render.
@@ -224,7 +252,8 @@ Error (last lines):
 {error}
 ```
 
-Return JSON {{"code": "..."}} with a corrected complete file. Keep the class name {cls}.
+Reply with only the corrected complete file in one ```python code block. Keep the class name {cls}
+and keep using the LernoScene helpers (set_title, show, label, note, clear_labels).
 Simplify anything risky: prefer Text over MathTex, drop anything not in the basic Manim API."""
 
 
@@ -282,14 +311,194 @@ def render(code: str, cls: str, out_path: Path) -> tuple[bool, str]:
         shutil.rmtree(work, ignore_errors=True)
 
 
+# Injected into every generated scene: before each play() it moves new labels off anything they
+# would overlap, then scales/shifts everything on screen so nothing leaves the frame.
+LERNO_BASE = r"""
+class LernoScene(Scene):
+    # zones (Manim units): title strip on top, diagram in the middle, notes row at the bottom
+    _W, _H = 13.0, 7.2
+    TOP_Y, DIAGRAM_TOP, DIAGRAM_BOTTOM, NOTES_Y = 3.3, 2.4, -1.7, -2.75
+
+    def setup(self):
+        self._title = None
+        self._diagram = None
+        self._labels_on = []
+        self._notes = VGroup()
+
+    # ---------------------------------------------------------------- helpers for the generated code
+    def set_title(self, text):
+        t = Text(text, font_size=38, weight=BOLD)
+        t.scale_to_fit_width(min(t.width, 11.5)).move_to(UP * self.TOP_Y)
+        if self._title is None:
+            self.play(Write(t), run_time=0.8)
+        else:
+            self.play(Transform(self._title, t), run_time=0.6)
+            t = self._title
+        self._title = t
+        return t
+
+    def show(self, diagram, anim=Create, run_time=1.2):
+        if self._diagram is not None and self._diagram in self.mobjects:
+            self.play(FadeOut(self._diagram), *[FadeOut(l) for l in self._labels_on], run_time=0.5)
+            self._labels_on = []
+        self._fit_diagram(diagram)
+        self._diagram = diagram
+        self.play(anim(diagram), run_time=run_time)
+        return diagram
+
+    def label(self, target, text, direction=UP, tex=False, color=WHITE):
+        lab = MathTex(text, color=color) if tex else Text(text, font_size=26, color=color)
+        lab.scale_to_fit_height(min(lab.height, 0.42))
+        self._place(lab, target, direction)
+        self._labels_on.append(lab)
+        self.play(FadeIn(lab, shift=direction * 0.15), run_time=0.5)
+        return lab
+
+    def note(self, text, tex=True):
+        n = MathTex(text) if tex else Text(text, font_size=28)
+        n.scale_to_fit_height(min(n.height, 0.5))
+        if len(self._notes) >= 3:
+            old = self._notes[0]
+            self._notes.remove(old)
+            self.play(FadeOut(old), run_time=0.3)
+        self._notes.add(n)
+        target = self._notes.copy().arrange(RIGHT, buff=0.9).move_to(UP * self.NOTES_Y)
+        if target.width > 12:
+            target.scale_to_fit_width(12)
+        anims = [m.animate.move_to(t.get_center()).scale(t.height / max(m.height, 1e-3)) for m, t in zip(self._notes[:-1], target[:-1])]
+        n.move_to(target[-1]).scale(target[-1].height / max(n.height, 1e-3))
+        self.play(*anims, FadeIn(n, shift=UP * 0.15), run_time=0.6)
+        return n
+
+    def clear_labels(self):
+        if self._labels_on:
+            self.play(*[FadeOut(l) for l in self._labels_on], run_time=0.4)
+        self._labels_on = []
+
+    # ---------------------------------------------------------------- layout internals
+    def _fit_diagram(self, d):
+        h_room = self.DIAGRAM_TOP - self.DIAGRAM_BOTTOM - 1.0  # leave space for labels above/below
+        k = min(10.0 / max(d.width, 1e-3), h_room / max(d.height, 1e-3), 2.2)
+        d.scale(k)
+        d.move_to(UP * (self.DIAGRAM_TOP + self.DIAGRAM_BOTTOM) / 2)
+
+    @staticmethod
+    def _box(m):
+        return m.get_left()[0], m.get_right()[0], m.get_bottom()[1], m.get_top()[1]
+
+    def _hits(self, a, b, pad=0.12):
+        l1, r1, b1, t1 = self._box(a)
+        l2, r2, b2, t2 = self._box(b)
+        return l1 < r2 + pad and l2 < r1 + pad and b1 < t2 + pad and b2 < t1 + pad
+
+    def _inside(self, m):
+        l, r, b, t = self._box(m)
+        return l > -self._W / 2 and r < self._W / 2 and b > self.NOTES_Y + 0.45 and t < self.TOP_Y - 0.4
+
+    def _obstacles(self, exclude):
+        obs = []
+        for o in self.mobjects:
+            if o is exclude or o is self._diagram:
+                continue
+            obs.append(o)
+        if self._diagram is not None:
+            obs += list(self._diagram.submobjects) or [self._diagram]
+        return obs
+
+    def _place(self, lab, target, direction):
+        dirs = [direction, UP, DOWN, RIGHT, LEFT, UR, UL, DR, DL]
+        seen, order = set(), []
+        for d in dirs:
+            k = tuple(np.round(d, 2))
+            if k not in seen:
+                seen.add(k)
+                order.append(d)
+        obs = None
+        for buff in (0.2, 0.45, 0.75):
+            for d in order:
+                lab.next_to(target, d, buff=buff)
+                if obs is None:
+                    obs = self._obstacles(lab)
+                if self._inside(lab) and not any(self._hits(lab, o) for o in obs if o is not target and o not in target.get_family()):
+                    return
+        lab.next_to(target, direction, buff=0.2)
+
+    def _nudge(self, m, obs):
+        # move m to the closest free spot around where the code put it
+        clash = lambda: any(self._hits(m, o, pad=0.06) for o in obs if o is not m)
+        if not clash():
+            return
+        home = m.get_center().copy()
+        sx, sy = m.width + 0.2, m.height + 0.15
+        for step in (1, 2, 3):
+            for d in (DOWN, UP, RIGHT, LEFT, DR, DL, UR, UL):
+                m.move_to(home + np.array([d[0] * sx, d[1] * sy, 0]) * step)
+                l, r, b, t = self._box(m)
+                if l > -self._W / 2 and r < self._W / 2 and b > -3.6 and t < 3.0 and not clash():
+                    return
+        m.move_to(home)
+
+    def _is_text(self, m):
+        return isinstance(m, (Text, MarkupText, MathTex, Tex)) or (
+            isinstance(m, VGroup) and len(m) > 0 and all(isinstance(x, (Text, MarkupText, MathTex, Tex)) for x in m))
+
+    def _tidy(self, anims):
+        # safety net for code that skips the helpers
+        try:
+            keep = {id(x) for x in [self._title, self._diagram] + self._labels_on + list(self._notes) if x is not None}
+            shapes = list(self._diagram.submobjects) if self._diagram is not None else []
+            placed_now = []
+            for a in anims:
+                m = getattr(a, "mobject", None)
+                if m is None or isinstance(a, FadeOut) or m in self.mobjects or not self._is_text(m) or id(m) in keep:
+                    continue
+                for o in list(self.mobjects):
+                    if o is not m and id(o) not in keep and self._is_text(o) and self._hits(m, o, pad=0.02) \
+                            and abs(o.get_center()[1] - m.get_center()[1]) < 0.15 and abs(o.get_center()[0] - m.get_center()[0]) < 0.5:
+                        self.remove(o)  # same spot: an updated value replaces the old one
+                obs = [o for o in self.mobjects if self._is_text(o) and o is not m] + placed_now + \
+                      [sh for sh in shapes if sh not in m.get_family()]
+                self._nudge(m, obs)
+                placed_now.append(m)
+            every = list(self.mobjects)
+            for a in anims:
+                m = getattr(a, "mobject", None)
+                if m is not None and not isinstance(a, FadeOut) and m not in every:
+                    every.append(m)
+                t = getattr(a, "target_mobject", None)
+                if t is not None:
+                    every.append(t)
+            if not every:
+                return
+            g = Group(*every)
+            k = min(1.0, self._W / max(g.width, 1e-3), 7.4 / max(g.height, 1e-3))
+            if k < 1.0:
+                c = g.get_center()
+                for m in every:
+                    m.scale(k, about_point=c)
+                g = Group(*every)
+            dx = max(0.0, -self._W / 2 - g.get_left()[0]) - max(0.0, g.get_right()[0] - self._W / 2)
+            dy = max(0.0, -3.7 - g.get_bottom()[1]) - max(0.0, g.get_top()[1] - 3.7)
+            if dx or dy:
+                for m in every:
+                    m.shift(RIGHT * dx + UP * dy)
+        except Exception:
+            pass
+
+    def play(self, *anims, **kw):
+        self._tidy(anims)
+        return super().play(*anims, **kw)
+"""
+
+
 def clean_code(code: str) -> str:
     code = code.strip()
     m = re.search(r"```(?:python)?\s*(.*?)```", code, re.S)
     if m:
         code = m.group(1)
-    if "from manim import" not in code:
-        code = "from manim import *\n\n" + code
-    return code
+    code = re.sub(r"^\s*from manim import \*\s*$", "", code, flags=re.M)
+    code = re.sub(r"class (Scene\d+)\(\s*Scene\s*\)", r"class \1(LernoScene)", code)
+    return "from manim import *\n" + LERNO_BASE + "\n" + code
 
 
 # ----------------------------------------------------------------------------- jobs
@@ -302,8 +511,13 @@ def build_scene(job_id: str, plan: dict, i: int, s: dict, key: str | None) -> di
     n, total = i + 1, len(plan["scenes"])
     cls = f"Scene{n}"
     try:
-        d = ask_json(SCENE.format(topic=plan["topic"], audience=plan["audience"], n=n, total=total,
-                                  title=s["title"], idea=s["idea"]), key, max_tokens=6000)
+        d = {}
+        for _ in range(2):  # one retry if the reply can't be parsed
+            raw = ask(SCENE.format(topic=plan["topic"], audience=plan["audience"], n=n, total=total,
+                                   title=s["title"], idea=s["idea"]), key, max_tokens=6000)
+            d = split_scene(raw)
+            if d.get("code"):
+                break
     except FreeQuota:
         raise
     except Exception as e:
@@ -332,7 +546,7 @@ def build_scene(job_id: str, plan: dict, i: int, s: dict, key: str | None) -> di
     while not ok and code and tries < FIX_ATTEMPTS:
         tries += 1
         try:
-            code = clean_code(ask_json(FIX.format(code=code, error=err, cls=cls), key, temperature=0.3, max_tokens=6000)["code"])
+            code = clean_code(ask(FIX.format(code=code, error=err, cls=cls), key, temperature=0.3, max_tokens=6000))
             ok, err = render(code, cls, out)
         except Exception as e:
             err = str(e)
@@ -438,7 +652,7 @@ def chat(body: ChatIn, x_gemini_key: str | None = Header(default=None)):
     try:
         return {"reply": ask(prompt, x_gemini_key, temperature=0.7, max_tokens=400)}
     except (NeedKey, FreeQuota):
-        raise HTTPException(401, {"code": "NEED_KEY", "message": "The free model is busy. Add a free Gemini key to chat."})
+        raise HTTPException(401, {"code": "NEED_KEY", "message": "The tutor is busy right now. Try again in a minute."})
     except BadKey as e:
         raise HTTPException(401, {"code": "BAD_KEY", "message": str(e)})
     except Exception:
@@ -450,14 +664,20 @@ def tts(body: TtsIn):
     if not MURF_KEY:
         raise HTTPException(503, "No TTS key, use the browser voice")
     try:
-        r = requests.post("https://api.murf.ai/v1/speech/generate",
-                          headers={"api-key": MURF_KEY, "Content-Type": "application/json"},
-                          json={"text": body.text[:2500], "voiceId": MURF_VOICE, "format": "MP3"},
-                          timeout=40)
-        r.raise_for_status()
-        url = r.json().get("audioFile")
-        if not url:
-            raise ValueError("no audio")
-        return {"audio_url": url}
-    except Exception:
+        text = body.text.strip()[:2500]
+        name = hashlib.sha1(f"{MURF_VOICE}|{text}".encode()).hexdigest()[:16] + ".mp3"
+        out = MEDIA / "tts" / name
+        if not out.exists():
+            r = requests.post("https://api.murf.ai/v1/speech/stream",
+                              headers={"api-key": MURF_KEY, "Content-Type": "application/json"},
+                              json={"text": text, "voiceId": MURF_VOICE, "model": MURF_MODEL, "format": "MP3"},
+                              timeout=60)
+            r.raise_for_status()
+            if "audio" not in r.headers.get("content-type", "") or not r.content:
+                raise ValueError("no audio")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(r.content)
+        return {"audio_url": f"/media/tts/{name}"}
+    except Exception as e:
+        print(f"murf failed: {e}", flush=True)
         raise HTTPException(503, "TTS unavailable, use the browser voice")
