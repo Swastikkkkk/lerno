@@ -67,10 +67,57 @@ export async function generateLesson(prompt: string, onUpdate?: (j: Job) => void
   }
 }
 
+// ---- language -------------------------------------------------------------------
+export type Lang = { code: string; name: string; native: string };
+export const LANGS: Lang[] = [
+  { code: "en-IN", name: "English", native: "English" },
+  { code: "hi-IN", name: "Hindi", native: "हिन्दी" },
+  { code: "bn-IN", name: "Bengali", native: "বাংলা" },
+  { code: "ta-IN", name: "Tamil", native: "தமிழ்" },
+  { code: "mr-IN", name: "Marathi", native: "मराठी" },
+  { code: "gu-IN", name: "Gujarati", native: "ગુજરાતી" },
+  { code: "kn-IN", name: "Kannada", native: "ಕನ್ನಡ" },
+  { code: "ml-IN", name: "Malayalam", native: "മലയാളം" },
+  { code: "pa-IN", name: "Punjabi", native: "ਪੰਜਾਬੀ" },
+  { code: "es-ES", name: "Spanish", native: "Español" },
+  { code: "fr-FR", name: "French", native: "Français" },
+  { code: "de-DE", name: "German", native: "Deutsch" },
+  { code: "pt-BR", name: "Portuguese", native: "Português" },
+  { code: "it-IT", name: "Italian", native: "Italiano" },
+  { code: "ja-JP", name: "Japanese", native: "日本語" },
+  { code: "ko-KR", name: "Korean", native: "한국어" },
+  { code: "zh-CN", name: "Chinese", native: "中文" },
+];
+const LANG_STORE = "lerno_lang";
+export const LANG_EVENT = "lerno:lang";
+export const getLang = () => {
+  try { return localStorage.getItem(LANG_STORE) || "en-IN"; } catch { return "en-IN"; }
+};
+export const setLang = (code: string) => {
+  try { localStorage.setItem(LANG_STORE, code); } catch { /* private mode */ }
+  window.dispatchEvent(new CustomEvent(LANG_EVENT, { detail: code }));
+};
+
+const tCache = new Map<string, string>();
+/** Translate lesson text with Murf (through the backend). Returns the originals on failure. */
+export async function translate(texts: string[], lang: string): Promise<string[]> {
+  if (lang === "en-IN") return texts;
+  const missing = texts.filter((t) => t && !tCache.has(`${lang}|${t}`));
+  if (missing.length) {
+    try {
+      const { data } = await api.post<{ texts: string[] }>("/translate", { texts: missing, lang }, { timeout: 60000 });
+      missing.forEach((t, i) => tCache.set(`${lang}|${t}`, data.texts[i] ?? t));
+    } catch {
+      return texts;
+    }
+  }
+  return texts.map((t) => tCache.get(`${lang}|${t}`) ?? t);
+}
+
 /** Speak text with Murf through the backend; fall back to the browser's own voice. */
-export async function speak(text: string, signal: { cancelled: boolean }): Promise<HTMLAudioElement | null> {
+export async function speak(text: string, signal: { cancelled: boolean }, lang = "en-IN"): Promise<HTMLAudioElement | null> {
   try {
-    const { data } = await api.post<{ audio_url: string }>("/tts", { text }, { timeout: 45000 });
+    const { data } = await api.post<{ audio_url: string }>("/tts", { text, lang }, { timeout: 45000 });
     if (signal.cancelled) return null;
     const audio = new Audio(data.audio_url);
     await audio.play().catch(() => {
@@ -83,6 +130,7 @@ export async function speak(text: string, signal: { cancelled: boolean }): Promi
     if (signal.cancelled || !("speechSynthesis" in window)) return null;
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
     u.rate = 1;
     window.speechSynthesis.speak(u);
     return null;

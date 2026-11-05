@@ -5,7 +5,8 @@ import { AnimatedShinyText } from "@/ui/animated-shiny-text";
 import { cn } from "@/lib/utils";
 import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { mediaUrl, speak, stopSpeaking, type Scene } from "@/lib/api";
+import { mediaUrl, speak, stopSpeaking, translate, getLang, LANG_EVENT, type Scene } from "@/lib/api";
+import LanguagePicker from "./LanguagePicker";
 
 const LearningPage = () => {
   const location = useLocation();
@@ -41,8 +42,28 @@ const LearningPage = () => {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
 
   const currentSlide = FetchData[currentSlideIndex] || FetchData[0];
-  const answer = currentSlide.assessment.multiple_choice.choices;
-  const question = currentSlide.assessment.multiple_choice.question;
+  const [lang, setLangState] = useState(getLang());
+  useEffect(() => {
+    const on = (e: Event) => setLangState((e as CustomEvent<string>).detail);
+    window.addEventListener(LANG_EVENT, on);
+    return () => window.removeEventListener(LANG_EVENT, on);
+  }, []);
+
+  // Text for the current slide in the chosen language (Murf translate, English passes through).
+  const mc = currentSlide.assessment.multiple_choice;
+  const [shown, setShown] = useState({ key: "", title: currentSlide.title, narration: currentSlide.narration, question: mc.question, choices: mc.choices });
+  const slideKey = `${lang}|${currentSlideIndex}|${currentSlide.title}`;
+  useEffect(() => {
+    let live = true;
+    const src = [currentSlide.title, currentSlide.narration, mc.question, ...mc.choices];
+    translate(src, lang).then((t) => {
+      if (live) setShown({ key: slideKey, title: t[0], narration: t[1], question: t[2], choices: t.slice(3) });
+    });
+    return () => { live = false; };
+  }, [slideKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const answer = shown.choices;
+  const question = shown.question;
   const correctAnswerIndex =
     currentSlide.assessment.multiple_choice.correct_index;
 
@@ -97,8 +118,8 @@ const LearningPage = () => {
   useEffect(() => {
     const signal = { cancelled: false };
     let audio: HTMLAudioElement | null = null;
-    if (currentSlide.narration) {
-      speak(currentSlide.narration, signal).then((a) => {
+    if (shown.key === slideKey && shown.narration) {
+      speak(shown.narration, signal, lang).then((a) => {
         if (signal.cancelled) stopSpeaking(a);
         else audio = a;
       });
@@ -107,11 +128,11 @@ const LearningPage = () => {
       signal.cancelled = true;
       stopSpeaking(audio);
     };
-  }, [currentSlide.narration]);
+  }, [shown.key, shown.narration]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex flex-col items-center w-full min-h-screen md:h-screen md:overflow-hidden bg-black p-4 md:p-6">
-      <div className="z-10 flex mb-4 md:mb-5 shrink-0">
+      <div className="z-10 flex items-center gap-3 mb-4 md:mb-5 shrink-0 w-full max-w-6xl justify-center relative">
         <div
           className={cn(
             "group rounded-full border border-black/5 bg-neutral-900 text-base transition-all ease-in hover:cursor-pointer hover:bg-neutral-800 shadow-lg"
@@ -126,11 +147,12 @@ const LearningPage = () => {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.3 }}
               >
-                {currentSlide.title}
+                {shown.title}
               </motion.span>
             </AnimatePresence>
           </AnimatedShinyText>
         </div>
+        <LanguagePicker className="md:absolute md:right-0" />
       </div>
       <AnimatePresence mode="wait" custom={direction}>
         <motion.div
@@ -225,7 +247,7 @@ const LearningPage = () => {
                 transition={{ duration: 0.5, delay: 0.2 }}
                 className="flex-grow overflow-y-auto pr-2 text-white/70 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
               >
-                <p>{currentSlide.narration}</p>
+                <p>{shown.narration}</p>
                 {murfError && (
                   <div style={{ color: "#F87171", marginTop: "8px" }}>
                     {murfError}
@@ -303,7 +325,7 @@ const LearningPage = () => {
             <AIChatbot
               lessonTitle={currentSlide.title}
               lessonContent={currentSlide.narration}
-              currentQuestion={currentSlide.assessment.multiple_choice.question}
+              currentQuestion={mc.question}
             />
           </div>
         </motion.div>

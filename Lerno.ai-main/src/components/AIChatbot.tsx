@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { api } from "@/lib/api";
+import { api, getLang } from "@/lib/api";
 
 const AIChatbot = ({ lessonTitle, lessonContent, currentQuestion }) => {
   const [messages, setMessages] = useState([
@@ -33,6 +33,7 @@ const AIChatbot = ({ lessonTitle, lessonContent, currentQuestion }) => {
     try {
       const { data } = await api.post<{ reply: string }>("/chat", {
         message: sent,
+        lang: getLang(),
         lesson: lessonTitle,
         content: lessonContent,
         question: currentQuestion,

@@ -3,6 +3,7 @@ import { PlaceholdersAndVanishInput } from "./PlaceholdersAndVanishInput";
 import { SparklesCore } from "../ui/sparkles";
 import { useNavigate } from "react-router-dom";
 import { generateLesson } from "@/lib/api";
+import LanguagePicker from "./LanguagePicker";
 import { MultiStepLoader } from "@/ui/multi-step-loader";
 
 export default function PlaceholdersAndVanishInputDemo() {
@@ -53,6 +54,9 @@ export default function PlaceholdersAndVanishInputDemo() {
 
   return (
     <div className="h-screen relative w-full bg-black flex flex-col items-center justify-center overflow-hidden rounded-md">
+      <div className="absolute top-5 right-5 z-[60]">
+        <LanguagePicker />
+      </div>
       <div className="w-full absolute inset-0 h-screen">
         <SparklesCore
           id="tsparticlesfullpage"

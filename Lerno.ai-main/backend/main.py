@@ -44,6 +44,27 @@ NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
 MURF_KEY = (os.getenv("MURF_API_KEY") or "").strip().strip('"').strip("'") or None
 MURF_VOICE = os.getenv("MURF_VOICE", "en-IN-nikhil")
 MURF_MODEL = os.getenv("MURF_MODEL", "FALCON")
+# language code -> (English name, native name, Murf Falcon voice)
+LANGS = {
+    "en-IN": ("English", "English", MURF_VOICE),
+    "hi-IN": ("Hindi", "हिन्दी", "hi-IN-karan"),
+    "bn-IN": ("Bengali", "বাংলা", "bn-IN-arnab"),
+    "ta-IN": ("Tamil", "தமிழ்", "ta-IN-sarvesh"),
+    "mr-IN": ("Marathi", "मराठी", "mr-IN-vaibhav"),
+    "gu-IN": ("Gujarati", "ગુજરાતી", "gu-IN-hardik"),
+    "kn-IN": ("Kannada", "ಕನ್ನಡ", "kn-IN-harshitha"),
+    "ml-IN": ("Malayalam", "മലയാളം", "ml-IN-madhavan"),
+    "pa-IN": ("Punjabi", "ਪੰਜਾਬੀ", "pa-IN-harman"),
+    "es-ES": ("Spanish", "Español", "es-ES-javier"),
+    "fr-FR": ("French", "Français", "fr-FR-axel"),
+    "de-DE": ("German", "Deutsch", "de-DE-ralf"),
+    "pt-BR": ("Portuguese", "Português", "pt-BR-yago"),
+    "it-IT": ("Italian", "Italiano", "it-IT-vincenzo"),
+    "ja-JP": ("Japanese", "日本語", "ja-JP-denki"),
+    "ko-KR": ("Korean", "한국어", "ko-KR-hwan"),
+    "zh-CN": ("Chinese", "中文", "zh-CN-tao"),
+}
+_translations: dict[tuple[str, str], str] = {}
 MEDIA = Path(os.getenv("MEDIA_DIR", "/tmp/lerno-media"))
 MEDIA.mkdir(parents=True, exist_ok=True)
 JOB_TTL = 3 * 60 * 60          # forget jobs and their videos after 3 hours
@@ -604,6 +625,7 @@ class GenerateIn(BaseModel):
 
 
 class ChatIn(BaseModel):
+    lang: str = "en-IN"
     message: str
     lesson: str = ""
     content: str = ""
@@ -613,6 +635,12 @@ class ChatIn(BaseModel):
 
 class TtsIn(BaseModel):
     text: str
+    lang: str = "en-IN"
+
+
+class TranslateIn(BaseModel):
+    texts: list[str]
+    lang: str = "en-IN"
 
 
 @app.get("/health")
@@ -648,7 +676,8 @@ def chat(body: ChatIn, x_gemini_key: str | None = Header(default=None)):
                         for h in body.history[-8:])
     prompt = (f"You are a friendly tutor. Lesson: \"{body.lesson}\". Lesson text: \"{body.content}\". "
               f"Current quiz question: \"{body.question}\".\n{history}\nStudent: {body.message}\n"
-              "Answer in 2 to 4 short sentences. Don't give away the quiz answer directly; guide them.")
+              "Answer in 2 to 4 short sentences. Don't give away the quiz answer directly; guide them."
+              + (f" Reply in {LANGS[body.lang][0]}." if body.lang in LANGS and body.lang != "en-IN" else ""))
     try:
         return {"reply": ask(prompt, x_gemini_key, temperature=0.7, max_tokens=400)}
     except (NeedKey, FreeQuota):
@@ -659,18 +688,47 @@ def chat(body: ChatIn, x_gemini_key: str | None = Header(default=None)):
         raise HTTPException(502, "The tutor is busy, try again in a moment.")
 
 
+@app.get("/languages")
+def languages():
+    return [{"code": k, "name": v[0], "native": v[1]} for k, v in LANGS.items()]
+
+
+@app.post("/translate")
+def translate(body: TranslateIn):
+    """Translate lesson text with Murf. English (or no key) returns the text unchanged."""
+    texts = [t if isinstance(t, str) else "" for t in body.texts][:40]
+    if body.lang not in LANGS or body.lang == "en-IN" or not MURF_KEY:
+        return {"texts": texts}
+    todo = [t for t in dict.fromkeys(texts) if t.strip() and (body.lang, t) not in _translations]
+    if todo:
+        try:
+            r = requests.post("https://api.murf.ai/v1/text/translate",
+                              headers={"api-key": MURF_KEY, "Content-Type": "application/json"},
+                              json={"targetLanguage": body.lang, "texts": todo}, timeout=60)
+            r.raise_for_status()
+            for src, item in zip(todo, r.json().get("translations", [])):
+                _translations[(body.lang, src)] = item.get("translated_text") or src
+        except Exception as e:
+            print(f"murf translate failed: {e}", flush=True)
+            raise HTTPException(503, "Translation unavailable right now")
+    if len(_translations) > 5000:
+        _translations.clear()
+    return {"texts": [_translations.get((body.lang, t), t) for t in texts]}
+
+
 @app.post("/tts")
 def tts(body: TtsIn):
     if not MURF_KEY:
         raise HTTPException(503, "No TTS key, use the browser voice")
     try:
         text = body.text.strip()[:2500]
-        name = hashlib.sha1(f"{MURF_VOICE}|{text}".encode()).hexdigest()[:16] + ".mp3"
+        voice = LANGS.get(body.lang, LANGS["en-IN"])[2]
+        name = hashlib.sha1(f"{voice}|{text}".encode()).hexdigest()[:16] + ".mp3"
         out = MEDIA / "tts" / name
         if not out.exists():
             r = requests.post("https://api.murf.ai/v1/speech/stream",
                               headers={"api-key": MURF_KEY, "Content-Type": "application/json"},
-                              json={"text": text, "voiceId": MURF_VOICE, "model": MURF_MODEL, "format": "MP3"},
+                              json={"text": text, "voiceId": voice, "model": MURF_MODEL, "format": "MP3"},
                               timeout=60)
             if r.status_code != 200:
                 raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]} (key len {len(MURF_KEY)}, starts {MURF_KEY[:4]})")
