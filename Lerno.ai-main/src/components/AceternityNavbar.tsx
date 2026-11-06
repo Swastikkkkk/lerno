@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/lib/auth";
 
 export default function AceternityNavbar() {
   const navItems = [
@@ -22,9 +23,9 @@ export default function AceternityNavbar() {
   }, []);
 
   const navigate = useNavigate();
-  // no accounts yet: both buttons take you straight to the lesson builder
-  const handleLogin = () => navigate("/chat");
-  const handleSignup = () => navigate("/chat");
+  const { user } = useAuth();
+  const handleLogin = () => navigate(user ? "/chat" : "/login");
+  const handleSignup = () => navigate(user ? "/chat" : "/signup");
 
   return (
     <div className="relative">

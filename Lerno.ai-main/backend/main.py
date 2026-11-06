@@ -253,6 +253,9 @@ Rules for "code":
     self.clear_labels()
   Animate changes with self.play(...) on parts of d (Indicate, Transform, d[i].animate.set_color(...), GrowArrow).
 - Labels: 1 to 4 words each, at most 4 per scene. Formulas only through self.note.
+- Keep the screen calm: at most 6 separate things visible at once. Before a new idea, FadeOut the old group.
+  Build rows with VGroup(...).arrange(RIGHT, buff=0.6) and stacks with .arrange(DOWN, buff=0.5): never place
+  two shapes by hand on top of or touching each other. Everything is centered by default; don't shift it aside.
 - Use only: Text, MathTex, Circle, Square, Rectangle, RoundedRectangle, Dot, Line, Arrow, Vector, NumberPlane,
   Axes, VGroup, Brace, SurroundingRectangle, and animations Create, Write, FadeIn, FadeOut, Transform,
   GrowArrow, Indicate, self.wait.
@@ -335,10 +338,16 @@ def render(code: str, cls: str, out_path: Path) -> tuple[bool, str]:
 # Injected into every generated scene: before each play() it moves new labels off anything they
 # would overlap, then scales/shifts everything on screen so nothing leaves the frame.
 LERNO_BASE = r"""
+import re
+from manim.animation.animation import prepare_animation
+
+
 class LernoScene(Scene):
-    # zones (Manim units): title strip on top, diagram in the middle, notes row at the bottom
+    # zones (Manim units, frame is ~14.2 x 8): title strip on top, diagram in the middle, notes row at the bottom
     _W, _H = 13.0, 7.2
     TOP_Y, DIAGRAM_TOP, DIAGRAM_BOTTOM, NOTES_Y = 3.3, 2.4, -1.7, -2.75
+    GAP = 0.45          # minimum clear space between separate elements (~1 cm on a laptop screen)
+    SHAPE_GAP = 0.25    # between shapes the code placed itself
 
     def setup(self):
         self._title = None
@@ -362,6 +371,7 @@ class LernoScene(Scene):
         if self._diagram is not None and self._diagram in self.mobjects:
             self.play(FadeOut(self._diagram), *[FadeOut(l) for l in self._labels_on], run_time=0.5)
             self._labels_on = []
+        self._spread(diagram)
         self._fit_diagram(diagram)
         self._diagram = diagram
         self.play(anim(diagram), run_time=run_time)
@@ -376,16 +386,25 @@ class LernoScene(Scene):
         return lab
 
     def note(self, text, tex=True):
-        n = MathTex(text) if tex else Text(text, font_size=28)
+        plain = re.sub(r"\\\\text\{([^}]*)\}", r"\1", text)
+        sentence = len(re.findall(r"[A-Za-z]{3,}", plain)) >= 3 and not re.search(r"[\\^_]", plain)
+        if sentence or not tex:
+            n = Text(plain.replace("\\", ""), font_size=28)
+        else:
+            n = MathTex(text)
         n.scale_to_fit_height(min(n.height, 0.5))
-        if len(self._notes) >= 3:
+        if n.width > 11:
+            n.scale_to_fit_width(11)
+        if len(self._notes) >= 2 or (len(self._notes) == 1 and self._notes[0].width + n.width > 10.5):
             old = self._notes[0]
             self._notes.remove(old)
             self.play(FadeOut(old), run_time=0.3)
         self._notes.add(n)
-        target = self._notes.copy().arrange(RIGHT, buff=0.9).move_to(UP * self.NOTES_Y)
+        target = self._notes.copy().arrange(RIGHT, buff=1.0).move_to(UP * self.NOTES_Y)
         if target.width > 12:
             target.scale_to_fit_width(12)
+        if target.height < 0.3:
+            target.scale_to_fit_height(0.3)
         anims = [m.animate.move_to(t.get_center()).scale(t.height / max(m.height, 1e-3)) for m, t in zip(self._notes[:-1], target[:-1])]
         n.move_to(target[-1]).scale(target[-1].height / max(n.height, 1e-3))
         self.play(*anims, FadeIn(n, shift=UP * 0.15), run_time=0.6)
@@ -396,13 +415,7 @@ class LernoScene(Scene):
             self.play(*[FadeOut(l) for l in self._labels_on], run_time=0.4)
         self._labels_on = []
 
-    # ---------------------------------------------------------------- layout internals
-    def _fit_diagram(self, d):
-        h_room = self.DIAGRAM_TOP - self.DIAGRAM_BOTTOM - 1.0  # leave space for labels above/below
-        k = min(10.0 / max(d.width, 1e-3), h_room / max(d.height, 1e-3), 2.2)
-        d.scale(k)
-        d.move_to(UP * (self.DIAGRAM_TOP + self.DIAGRAM_BOTTOM) / 2)
-
+    # ---------------------------------------------------------------- geometry
     @staticmethod
     def _box(m):
         return m.get_left()[0], m.get_right()[0], m.get_bottom()[1], m.get_top()[1]
@@ -412,18 +425,80 @@ class LernoScene(Scene):
         l2, r2, b2, t2 = self._box(b)
         return l1 < r2 + pad and l2 < r1 + pad and b1 < t2 + pad and b2 < t1 + pad
 
+    def _contains(self, a, b, slack=0.05):
+        l1, r1, b1, t1 = self._box(a)
+        l2, r2, b2, t2 = self._box(b)
+        return l1 <= l2 + slack and r2 <= r1 + slack and b1 <= b2 + slack and t2 <= t1 + slack
+
+    @staticmethod
+    def _is_connector(m):
+        return isinstance(m, (Line, Arrow, DashedLine, Brace, Vector)) or type(m).__name__ in ("CurvedArrow", "DoubleArrow", "Arc", "ArcBetweenPoints")
+
+    @staticmethod
+    def _is_highlight(m):
+        # an empty outline (SurroundingRectangle, a ring around a node): meant to sit on top of something
+        try:
+            return isinstance(m, VMobject) and not m.submobjects and m.get_fill_opacity() < 0.05 and not isinstance(m, (Text, MathTex, Tex))
+        except Exception:
+            return False
+
+    def _is_text(self, m):
+        return isinstance(m, (Text, MarkupText, MathTex, Tex)) or (
+            isinstance(m, VGroup) and len(m) > 0 and all(isinstance(x, (Text, MarkupText, MathTex, Tex)) for x in m))
+
+    def _parts(self, m):
+        # a group is judged by its pieces, so a label can sit next to one node of a list
+        subs = [s for s in m.submobjects if s.width + s.height > 0.05] if isinstance(m, (VGroup, Group)) and not self._is_text(m) else []
+        return subs if len(subs) > 1 else [m]
+
     def _inside(self, m):
         l, r, b, t = self._box(m)
-        return l > -self._W / 2 and r < self._W / 2 and b > self.NOTES_Y + 0.45 and t < self.TOP_Y - 0.4
+        return l > -self._W / 2 and r < self._W / 2 and b > -3.7 and t < self.TOP_Y - 0.35
+
+    # ---------------------------------------------------------------- layout internals
+    def _spread(self, d):
+        # siblings that partly overlap (not one inside another) get re-laid out in a row or grid with a real gap
+        kids = [k for k in d.submobjects if not self._is_connector(k)]
+        if len(kids) < 2 or len(kids) != len(d.submobjects):
+            return  # connectors depend on the original positions; leave those layouts alone
+        def overlap(a, b):  # share of the smaller box that is covered; touching cells (arrays) score ~0
+            l1, r1, b1, t1 = self._box(a)
+            l2, r2, b2, t2 = self._box(b)
+            w, h = min(r1, r2) - max(l1, l2), min(t1, t2) - max(b1, b2)
+            if w <= 0 or h <= 0:
+                return 0.0
+            small = min((r1 - l1) * (t1 - b1), (r2 - l2) * (t2 - b2)) or 1e-6
+            return w * h / small
+        clash = any(overlap(a, b) > 0.12 and not self._contains(a, b) and not self._contains(b, a)
+                    for i, a in enumerate(kids) for b in kids[i + 1:])
+        if not clash:
+            return
+        xs = [k.get_center()[0] for k in kids]
+        ys = [k.get_center()[1] for k in kids]
+        wide = (max(xs) - min(xs)) >= (max(ys) - min(ys))  # keep the direction the code was going for
+        if not wide:
+            kids.sort(key=lambda k: -k.get_center()[1])
+            d.submobjects = kids
+        else:
+            kids.sort(key=lambda k: k.get_center()[0])
+            d.submobjects = kids
+        if len(kids) <= 6:
+            d.arrange(RIGHT if wide else DOWN, buff=self.GAP + 0.15)
+        else:
+            d.arrange_in_grid(buff=self.GAP + 0.15)
+
+    def _fit_diagram(self, d):
+        h_room = self.DIAGRAM_TOP - self.DIAGRAM_BOTTOM - 1.0  # leave space for labels above/below
+        k = min(10.0 / max(d.width, 1e-3), h_room / max(d.height, 1e-3), 2.2)
+        d.scale(k)
+        d.move_to(UP * (self.DIAGRAM_TOP + self.DIAGRAM_BOTTOM) / 2)
 
     def _obstacles(self, exclude):
         obs = []
         for o in self.mobjects:
-            if o is exclude or o is self._diagram:
+            if o is exclude or self._is_connector(o):
                 continue
-            obs.append(o)
-        if self._diagram is not None:
-            obs += list(self._diagram.submobjects) or [self._diagram]
+            obs += self._parts(o)
         return obs
 
     def _place(self, lab, target, direction):
@@ -434,52 +509,78 @@ class LernoScene(Scene):
             if k not in seen:
                 seen.add(k)
                 order.append(d)
-        obs = None
-        for buff in (0.2, 0.45, 0.75):
+        obs = [o for o in self._obstacles(lab) if o is not target and o not in target.get_family()]
+        for buff in (0.25, 0.5, 0.8):
             for d in order:
                 lab.next_to(target, d, buff=buff)
-                if obs is None:
-                    obs = self._obstacles(lab)
-                if self._inside(lab) and not any(self._hits(lab, o) for o in obs if o is not target and o not in target.get_family()):
+                if self._inside(lab) and not any(self._hits(lab, o, pad=self.GAP * 0.6) for o in obs):
                     return
-        lab.next_to(target, direction, buff=0.2)
+        lab.next_to(target, direction, buff=0.25)
 
-    def _nudge(self, m, obs):
-        # move m to the closest free spot around where the code put it
-        clash = lambda: any(self._hits(m, o, pad=0.06) for o in obs if o is not m)
-        if not clash():
+    def _free(self, m, obs, pad):
+        return not any(self._hits(m, o, pad=pad) for o in obs if o is not m)
+
+    def _nudge(self, m, obs, pad):
+        # move m to the closest free spot around where the code put it; shrink it a little if nothing fits
+        if self._free(m, obs, pad):
             return
         home = m.get_center().copy()
-        sx, sy = m.width + 0.2, m.height + 0.15
-        for step in (1, 2, 3):
-            for d in (DOWN, UP, RIGHT, LEFT, DR, DL, UR, UL):
-                m.move_to(home + np.array([d[0] * sx, d[1] * sy, 0]) * step)
-                l, r, b, t = self._box(m)
-                if l > -self._W / 2 and r < self._W / 2 and b > -3.6 and t < 3.0 and not clash():
-                    return
+        for shrink in (1.0, 0.85, 0.7):
+            if shrink < 1.0:
+                m.move_to(home).scale(shrink)
+            sx, sy = m.width + pad, m.height + pad
+            for step in (1, 2, 3, 4):
+                for d in (DOWN, UP, RIGHT, LEFT, DR, DL, UR, UL):
+                    m.move_to(home + np.array([d[0] * sx, d[1] * sy, 0]) * step * 0.6)
+                    if self._inside(m) and self._free(m, obs, pad):
+                        return
         m.move_to(home)
 
-    def _is_text(self, m):
-        return isinstance(m, (Text, MarkupText, MathTex, Tex)) or (
-            isinstance(m, VGroup) and len(m) > 0 and all(isinstance(x, (Text, MarkupText, MathTex, Tex)) for x in m))
-
     def _tidy(self, anims):
-        # safety net for code that skips the helpers
+        # safety net for every play(): gaps between elements, wide things centered, nothing outside the frame
         try:
             keep = {id(x) for x in [self._title, self._diagram] + self._labels_on + list(self._notes) if x is not None}
-            shapes = list(self._diagram.submobjects) if self._diagram is not None else []
             placed_now = []
+            todo = []
             for a in anims:
                 m = getattr(a, "mobject", None)
-                if m is None or isinstance(a, FadeOut) or m in self.mobjects or not self._is_text(m) or id(m) in keep:
+                if m is None or isinstance(a, FadeOut):
                     continue
-                for o in list(self.mobjects):
-                    if o is not m and id(o) not in keep and self._is_text(o) and self._hits(m, o, pad=0.02) \
-                            and abs(o.get_center()[1] - m.get_center()[1]) < 0.15 and abs(o.get_center()[0] - m.get_center()[0]) < 0.5:
-                        self.remove(o)  # same spot: an updated value replaces the old one
-                obs = [o for o in self.mobjects if self._is_text(o) and o is not m] + placed_now + \
-                      [sh for sh in shapes if sh not in m.get_family()]
-                self._nudge(m, obs)
+                t = getattr(a, "target_mobject", None)
+                if t is not None and t is not m and self._is_text(t) and t not in self.mobjects:
+                    todo.append((t, m))  # text that something is turning into: place it like new text
+                if m in self.mobjects or id(m) in keep or self._is_connector(m) or self._is_highlight(m):
+                    continue
+                todo.append((m, None))
+            for m, source in todo:
+                if self._is_text(m) and m.height < 0.26:
+                    m.scale_to_fit_height(0.26)  # never smaller than readable
+                if self._is_text(m) and source is None:
+                    for o in list(self.mobjects):  # same spot: an updated value replaces the old one
+                        if o is not m and o is not source and id(o) not in keep and self._is_text(o) and self._hits(m, o, pad=0.02) \
+                                and abs(o.get_center()[1] - m.get_center()[1]) < 0.15 and abs(o.get_center()[0] - m.get_center()[0]) < 0.5:
+                            self.remove(o)
+                else:
+                    if isinstance(m, (VGroup, Group)):
+                        c0 = m.get_center().copy()
+                        self._spread(m)  # pieces drawn on top of each other get a real gap
+                        m.move_to(c0)
+                    others = [o for o in self.mobjects if o is not self._title and not self._is_text(o) and not self._is_connector(o)]
+                    if not others and abs(m.get_center()[0]) > 0.6:
+                        m.set_x(0)  # first thing on screen: center it
+                skip = set(id(x) for x in source.get_family()) if source is not None else set()
+                obs = []
+                for o in self._obstacles(m) + placed_now:
+                    if id(o) in skip:
+                        continue
+                    if self._is_text(o) and self._is_text(m):
+                        obs.append(o)  # two texts never share space
+                        continue
+                    elif (self._contains(o, m) and o.width * o.height > 1.6 * m.width * m.height) or \
+                            (self._contains(m, o) and m.width * m.height > 1.6 * o.width * o.height):
+                        continue  # text inside its box, box around its content: intentional
+                    obs.append(o)
+                self._nudge(m, obs, self.GAP if self._is_text(m) else self.SHAPE_GAP)
                 placed_now.append(m)
             every = list(self.mobjects)
             for a in anims:
@@ -506,8 +607,54 @@ class LernoScene(Scene):
         except Exception:
             pass
 
+    def _settle_moves(self, anims):
+        # things moved with .animate or turned into another shape: check where they END UP, against where
+        # everything else ends up, and shift the end spot if it would land on top of something
+        try:
+            moving = {}
+            for a in anims:
+                m = getattr(a, "mobject", None)
+                if m is None or isinstance(a, FadeOut):
+                    continue
+                if isinstance(a, MoveToTarget) and getattr(m, "target", None) is not None:
+                    moving[id(m)] = (m, m.target)
+                else:
+                    t = getattr(a, "target_mobject", None)
+                    if t is not None and t is not m and not self._is_text(t) and not self._is_connector(t):
+                        moving[id(m)] = (m, t)
+            if not moving:
+                return
+            finals, seen = [], set()
+            for o in self.mobjects:
+                if self._is_connector(o) or o is self._title:
+                    continue
+                for p in self._parts(o):
+                    finals.append((p, moving[id(p)][1] if id(p) in moving else p))
+                    seen.add(id(p))
+            for k, (m, t) in moving.items():
+                if k not in seen:
+                    finals.append((m, t))
+            for m, t in list(moving.values()):
+                if self._is_highlight(m) or self._is_connector(m):
+                    continue
+                fam = {id(x) for x in m.get_family()}
+                others = []
+                for p2, t2 in finals:
+                    if id(p2) in fam or id(m) in {id(x) for x in p2.get_family()}:
+                        continue
+                    if self._is_text(t2) and self._is_text(t):
+                        others.append(t2)
+                    elif not ((self._contains(t2, t) and t2.width * t2.height > 1.6 * t.width * t.height) or
+                              (self._contains(t, t2) and t.width * t.height > 1.6 * t2.width * t2.height)):
+                        others.append(t2)
+                self._nudge(t, others, self.GAP if self._is_text(t) else self.SHAPE_GAP)
+        except Exception:
+            pass
+
     def play(self, *anims, **kw):
+        anims = [prepare_animation(a) for a in anims]
         self._tidy(anims)
+        self._settle_moves(anims)
         return super().play(*anims, **kw)
 """
 

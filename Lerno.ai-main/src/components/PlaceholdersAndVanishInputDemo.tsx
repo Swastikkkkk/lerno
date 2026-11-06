@@ -2,12 +2,15 @@ import React, { useState } from "react";
 import { PlaceholdersAndVanishInput } from "./PlaceholdersAndVanishInput";
 import { SparklesCore } from "../ui/sparkles";
 import { useNavigate } from "react-router-dom";
-import { generateLesson } from "@/lib/api";
+import { generateLesson, getLang } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { createLesson, persistVideos } from "@/lib/lessons";
 import LanguagePicker from "./LanguagePicker";
 import { MultiStepLoader } from "@/ui/multi-step-loader";
 
 export default function PlaceholdersAndVanishInputDemo() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [inputValue, setInputValue] = React.useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [stage, setStage] = useState("");
@@ -41,8 +44,15 @@ export default function PlaceholdersAndVanishInputDemo() {
 
     try {
       const job = await generateLesson(inputValue, (j) => setStage(j.stage));
-      navigate("/learning", {
-        state: { query: inputValue, topic: job.topic, responseData: job.scenes },
+      let lessonId: string | null = null;
+      if (user) {
+        try {
+          lessonId = await createLesson(inputValue, job.topic || job.scenes[0]?.title || inputValue, job.scenes, getLang());
+          persistVideos(lessonId, user.id, job.scenes).catch(() => {}); // keeps videos after the render server restarts
+        } catch { /* still show the lesson even if saving fails */ }
+      }
+      navigate(lessonId ? `/learning?id=${lessonId}` : "/learning", {
+        state: { query: inputValue, topic: job.topic, responseData: job.scenes, lessonId },
       });
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: { message?: string } | string } } })?.response?.data?.detail;
@@ -53,7 +63,7 @@ export default function PlaceholdersAndVanishInputDemo() {
   };
 
   return (
-    <div className="h-screen relative w-full bg-black flex flex-col items-center justify-center overflow-hidden rounded-md">
+    <div className="h-full min-h-screen relative w-full bg-black flex flex-col items-center justify-center overflow-hidden rounded-md">
       <div className="absolute top-5 right-5 z-[60]">
         <LanguagePicker />
       </div>

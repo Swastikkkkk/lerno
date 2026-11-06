@@ -3,17 +3,34 @@ import AIChatbot from "./AIChatbot";
 import { HoverBorderGradient } from "@/ui/hover-border-gradient";
 import { AnimatedShinyText } from "@/ui/animated-shiny-text";
 import { cn } from "@/lib/utils";
-import { useLocation } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
+import { getLesson, updateLesson } from "@/lib/lessons";
+import { useAuth } from "@/lib/auth";
+import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { mediaUrl, speak, stopSpeaking, translate, getLang, LANG_EVENT, type Scene } from "@/lib/api";
 import LanguagePicker from "./LanguagePicker";
 import LessonPlayer from "./LessonPlayer";
 
-const LearningPage = () => {
+type PageProps = { scenes?: Scene[]; lessonId?: string | null; initialNotes?: string };
+
+const LearningPage = ({ scenes, lessonId = null, initialNotes = "" }: PageProps) => {
   const location = useLocation();
+  const { user } = useAuth();
+  const [tab, setTab] = useState<"narration" | "notes">("narration");
+  const [notes, setNotes] = useState(initialNotes);
+  const [saved, setSaved] = useState<"idle" | "saving" | "saved">("idle");
+  useEffect(() => {
+    if (!lessonId || notes === initialNotes) return;
+    setSaved("saving");
+    const t = window.setTimeout(() => {
+      updateLesson(lessonId, { notes }).then(() => setSaved("saved")).catch(() => setSaved("idle"));
+    }, 700);
+    return () => window.clearTimeout(t);
+  }, [notes]); // eslint-disable-line react-hooks/exhaustive-deps
   const [murfError] = useState<string | null>(null);
 
-  const FetchData: Scene[] = location.state?.responseData || [
+  const FetchData: Scene[] = scenes || location.state?.responseData || [
     {
       scene_number: 1,
       video_url: null,
@@ -205,8 +222,36 @@ const LearningPage = () => {
                     />
                   </svg>
                 </div>
-                <h3 className="text-lg font-medium text-white">Narration</h3>
+                <div className="flex items-center gap-1 rounded-full bg-white/[0.05] p-0.5">
+                  {(["narration", "notes"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setTab(t)}
+                      className={`rounded-full px-3 py-1 text-sm capitalize transition-colors ${tab === t ? "bg-white text-black" : "text-white/70 hover:text-white"}`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                {tab === "notes" && lessonId && (
+                  <span className="ml-auto text-xs text-white/40">{saved === "saving" ? "Saving..." : saved === "saved" ? "Saved" : ""}</span>
+                )}
               </div>
+              {tab === "notes" ? (
+                lessonId ? (
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Write your notes for this lesson. They save automatically."
+                    className="flex-grow resize-none rounded-lg border border-white/10 bg-black/30 p-3 text-sm leading-relaxed text-white/90 placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-white/20"
+                  />
+                ) : (
+                  <div className="flex flex-grow flex-col items-center justify-center gap-3 text-center text-sm text-white/60">
+                    {user ? "Notes are available on lessons you create while signed in." : "Sign in to take notes and keep this lesson in your sidebar."}
+                    {!user && <Link to="/login" className="rounded-full bg-white px-4 py-1.5 font-medium text-black hover:bg-neutral-200">Sign in</Link>}
+                  </div>
+                )
+              ) : (<>
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -220,6 +265,7 @@ const LearningPage = () => {
                   </div>
                 )}
               </motion.div>
+              </>)}
               <div className="pt-4 flex justify-end shrink-0">
               <HoverBorderGradient
                 containerClassName={`rounded-full ${
@@ -300,4 +346,26 @@ const LearningPage = () => {
   );
 };
 
-export default LearningPage;
+/** /learning?id=... loads a saved lesson; /learning with router state shows a fresh one. */
+export default function LearningRoute() {
+  const [params] = useSearchParams();
+  const location = useLocation();
+  const id = params.get("id") || location.state?.lessonId || null;
+  const fresh = location.state?.responseData as Scene[] | undefined;
+  const [data, setData] = useState<{ scenes: Scene[]; notes: string } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setData(null);
+    setFailed(false);
+    if (!id || fresh) return;
+    getLesson(id).then((l) => (l ? setData({ scenes: l.scenes, notes: l.notes }) : setFailed(true))).catch(() => setFailed(true));
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (id && !fresh && !data) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-black text-white/60">
+        {failed ? "This lesson isn't available. Sign in with the account that made it." : <span className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />}
+      </div>
+    );
+  }
+  return <LearningPage key={id || "fresh"} scenes={data?.scenes} lessonId={id} initialNotes={data?.notes || ""} />;
+}

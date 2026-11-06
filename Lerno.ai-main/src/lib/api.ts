@@ -43,7 +43,7 @@ export type Job = {
   error?: string;
 };
 
-export const mediaUrl = (path: string | null) => (path ? `${API_URL}${path}` : null);
+export const mediaUrl = (path: string | null) => (path ? (/^https?:/.test(path) ? path : `${API_URL}${path}`) : null);
 
 /** Start a lesson and resolve when it finishes. Calls onUpdate with each poll. */
 export async function generateLesson(prompt: string, onUpdate?: (j: Job) => void): Promise<Job> {

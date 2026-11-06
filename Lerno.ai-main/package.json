@@ -13,6 +13,7 @@
   "dependencies": {
     "@11labs/react": "^0.1.0",
     "@google/generative-ai": "^0.24.0",
+    "@supabase/supabase-js": "^2.49.4",
     "@tailwindcss/vite": "^4.0.14",
     "@tsparticles/react": "^3.0.0",
     "@tsparticles/slim": "^3.8.1",
