@@ -651,11 +651,24 @@ class LernoScene(Scene):
         except Exception:
             pass
 
+    def add(self, *mobs):
+        # things added without an animation get the same layout pass (play() adds its own mobjects; skip those)
+        if not getattr(self, "_in_play", False) and hasattr(self, "_notes"):
+            class _Added:
+                def __init__(self, m):
+                    self.mobject = m
+            self._tidy([_Added(m) for m in mobs if m not in self.mobjects])
+        return super().add(*mobs)
+
     def play(self, *anims, **kw):
         anims = [prepare_animation(a) for a in anims]
         self._tidy(anims)
         self._settle_moves(anims)
-        return super().play(*anims, **kw)
+        self._in_play = True
+        try:
+            return super().play(*anims, **kw)
+        finally:
+            self._in_play = False
 """
 
 
