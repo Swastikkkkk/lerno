@@ -1,5 +1,5 @@
 """HF Space entry (Gradio SDK, ZeroGPU free tier). Copy ../main.py next to this file.
-Gradio owns the server there, so Lerno's FastAPI routes are added to the app Gradio creates,
+Gradio owns the server there, so ExplAInr's FastAPI routes are added to the app Gradio creates,
 plus open CORS for the Vercel frontend."""
 import os
 os.environ.setdefault("GRADIO_SSR_MODE", "false")
@@ -13,7 +13,7 @@ from main import app as lerno
 
 @spaces.GPU(duration=1)
 def _noop():
-    return "ok"  # ZeroGPU needs one GPU function; Lerno itself runs on CPU
+    return "ok"  # ZeroGPU needs one GPU function; ExplAInr itself runs on CPU
 
 
 _create = gr_routes.App.create_app
@@ -29,8 +29,8 @@ def _create_with_lerno(*args, **kwargs):
 
 gr_routes.App.create_app = staticmethod(_create_with_lerno)
 
-with gr.Blocks(title="Lerno backend") as demo:
-    gr.Markdown("Lerno.ai backend is running. API: /health, /generate, /jobs/{id}, /chat")
+with gr.Blocks(title="ExplAInr backend") as demo:
+    gr.Markdown("ExplAInr backend is running. API: /health, /generate, /jobs/{id}, /chat")
 
 if __name__ == "__main__":
     demo.launch(ssr_mode=False)

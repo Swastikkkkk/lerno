@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import { LogoMark, Wordmark } from "./Brand";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 
@@ -89,16 +90,8 @@ export default function AceternityNavbar() {
                 href="#"
                 className="flex items-center space-x-2 px-2 py-1 text-sm font-normal"
               >
-                <img
-                  src="/logo.png"
-                  alt="logo"
-                  width={24}
-                  height={24}
-                  className=" sm:w-[30px] sm:h-[30px]"
-                />
-                <span className="font-medium text-white text-sm sm:text-base">
-                  Lerno AI
-                </span>
+                <LogoMark size={28} />
+                <span className="font-medium text-white text-sm sm:text-base"><Wordmark /></span>
               </a>
             </div>
 
@@ -145,7 +138,7 @@ export default function AceternityNavbar() {
                   height={28}
                   className="invert"
                 />
-                <span className="font-medium text-white text-sm">Lerno AI</span>
+                <span className="font-medium text-white text-sm"><Wordmark /></span>
               </a>
             </div>
 
@@ -193,9 +186,7 @@ export default function AceternityNavbar() {
                     height={24}
                     className="invert"
                   />
-                  <span className="font-medium text-white text-sm">
-                    Lerno AI
-                  </span>
+                  <span className="font-medium text-white text-sm"><Wordmark /></span>
                 </a>
               </div>
               <button

@@ -1,10 +1,10 @@
-# Lerno.ai
+# ExplAInr
 
-Type a concept, get a short animated explainer back. Lerno plans the lesson as a storyboard, writes a Manim scene for each frame, renders them to video and plays them with narration. A chat tutor sits next to the video for follow-up questions.
+Type a concept, get a short animated explainer back. ExplAInr plans the lesson as a storyboard, writes a Manim scene for each frame, renders them to video and plays them with narration. A chat tutor sits next to the video for follow-up questions.
 
 **Live:** [lerno-peach.vercel.app](https://lerno-peach.vercel.app) (frontend; video generation needs the Python backend running, see below)
 
-![Lerno.ai landing page](.github/assets/screenshot.jpg)
+![ExplAInr landing page](.github/assets/screenshot.jpg)
 
 Won first place at Google Codeclash 2.0 (Gurugram, 1,000+ teams). First built at HackoWasp 7.0 by team Ctrl-Alt-Defeat (Suryansh Pratap Singh, Tejas Mehra, Swastik Dutt). [Pitch deck](https://www.figma.com/slides/2P1pYfOLMtQcbQfyhlG9fi/lerno.ai-CTRL-ALT-DEFEAT?node-id=0-239).
 
@@ -57,7 +57,7 @@ uvicorn main:app --port 8000        # generator on :8000
 Create `Lerno.ai-main/backend/.env`:
 
 ```
-# all optional, Lerno runs with no keys
+# all optional, ExplAInr runs with no keys
 GEMINI_API_KEY=...        # faster lessons, free from aistudio.google.com
 POLLINATIONS_TOKEN=...     # higher free rate limits
 ```

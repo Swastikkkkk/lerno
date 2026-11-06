@@ -1,8 +1,8 @@
-# Lerno.ai - Revolutionizing ed-tech with AI-Driven Personalization
+# ExplAInr - Revolutionizing ed-tech with AI-Driven Personalization
 
 ## Overview
 
-An AI-powered learning platform that visualizes concepts to enhance student understanding and retention. Lerno.ai is an intelligent learning platform that combines frontend web technologies with backend services in Node.js and FastAPI to deliver a comprehensive educational experience.
+An AI-powered learning platform that visualizes concepts to enhance student understanding and retention. ExplAInr is an intelligent learning platform that combines frontend web technologies with backend services in Node.js and FastAPI to deliver a comprehensive educational experience.
 
 Check out the PPT for details! - https://www.figma.com/slides/2P1pYfOLMtQcbQfyhlG9fi/lerno.ai-CTRL-ALT-DEFEAT?node-id=0-239&t=EhwKERTP5aHifi0N-1
 
@@ -19,8 +19,8 @@ Check out the PPT for details! - https://www.figma.com/slides/2P1pYfOLMtQcbQfyhl
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/suryansh04/Lerno.ai-HackoWasp-7.0--Ctrl-Alt-Defeat
-cd Lerno.ai-HackoWasp-7.0--Ctrl-Alt-Defeat
+git clone https://github.com/suryansh04/ExplAInr-HackoWasp-7.0--Ctrl-Alt-Defeat
+cd ExplAInr-HackoWasp-7.0--Ctrl-Alt-Defeat
 ```
 
 ### 2. Frontend Setup
@@ -53,7 +53,7 @@ pip install -r requirements.txt
 Create a .env file in the root directory with the following variables:
 
 ```plaintext
-# Optional. Lerno works with no keys (free Pollinations model).
+# Optional. ExplAInr works with no keys (free Pollinations model).
 GEMINI_API_KEY=your_free_gemini_key
 ```
 

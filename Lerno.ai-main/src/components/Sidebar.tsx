@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { LogoMark, Wordmark } from "./Brand";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2 } from "lucide-react";
@@ -60,8 +61,8 @@ export function Sidebar({ open, setOpen }: { open: boolean; setOpen: (o: boolean
     >
       <div className="flex items-center justify-between px-3 pb-2 pt-3">
         <Link to="/" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-white hover:bg-white/[0.06]">
-          <img src="/logo.png" alt="" width={22} height={22} />
-          <span className="text-[15px] font-semibold">Lerno AI</span>
+          <LogoMark size={22} />
+          <Wordmark className="text-[15px]" />
         </Link>
         <button onClick={() => setOpen(false)} className="rounded-lg p-2 text-neutral-400 hover:bg-white/[0.06] hover:text-white" aria-label="Close sidebar">
           <PanelLeftClose className="h-5 w-5" />

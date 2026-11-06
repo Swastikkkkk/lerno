@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { LogoMark, Wordmark } from "./Brand";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, Eye, EyeOff, Lock, Mail, User } from "lucide-react";
 import { SparklesCore } from "@/ui/sparkles";
@@ -17,7 +18,7 @@ const GoogleIcon = () => (
 const input =
   "w-full rounded-2xl border border-[#333] bg-[#191919]/80 py-3.5 pl-12 pr-4 text-white placeholder-gray-500 transition focus:border-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-600";
 
-/** Email/password and Google sign-in through Supabase, in the original Lerno card design. */
+/** Email/password and Google sign-in through Supabase, in the original card design. */
 export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -80,8 +81,8 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
         <div className="absolute inset-0 rounded-3xl border border-[#232323] bg-black/90 shadow-2xl backdrop-blur-sm" />
         <div className="relative p-8">
           <Link to="/" className="mx-auto mb-6 flex w-fit items-center gap-2 text-white">
-            <img src="/logo.png" alt="" width={28} height={28} />
-            <span className="font-semibold">Lerno AI</span>
+            <LogoMark size={30} />
+            <Wordmark className="text-lg" />
           </Link>
           <div className="mb-8 text-center">
             <h1 className="mb-2 text-3xl font-bold text-white">{signup ? "Create your account" : "Welcome back"}</h1>

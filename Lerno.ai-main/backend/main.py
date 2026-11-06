@@ -1,4 +1,4 @@
-"""Lerno.ai backend.
+"""ExplAInr backend.
 
 POST /generate {prompt}      -> {job_id}
 GET  /jobs/{job_id}          -> status, stage, progress, scenes (with video_url when rendered)
@@ -101,7 +101,7 @@ pool = ThreadPoolExecutor(max_workers=8)
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
 
-app = FastAPI(title="Lerno.ai")
+app = FastAPI(title="ExplAInr")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/media", StaticFiles(directory=str(MEDIA)), name="media")
 
@@ -124,7 +124,7 @@ def ask_free(prompt: str, as_json: bool, temperature: float, max_tokens: int = 4
             with free_slots:
                 r = requests.post(FREE_URL, json=body, headers=headers, timeout=150)
             if r.status_code == 402:
-                raise FreeQuota("Lerno is busy right now. Try again in a minute.")
+                raise FreeQuota("ExplAInr is busy right now. Try again in a minute.")
             if r.status_code in (400, 429) or r.status_code >= 500:
                 raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
             r.raise_for_status()

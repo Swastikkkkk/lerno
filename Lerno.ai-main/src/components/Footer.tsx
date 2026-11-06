@@ -1,4 +1,5 @@
 import React from "react";
+import { LogoMark, Wordmark } from "./Brand";
 import { FaGithub, FaXTwitter, FaLinkedin, FaInstagram } from "react-icons/fa6";
 
 const Footer: React.FC = () => (
@@ -10,11 +11,11 @@ const Footer: React.FC = () => (
           <span className="bg-black rounded-md w-8 h-8 flex items-center justify-center mr-3">
             {/* You can replace this with your SVG/Logo */}
             <span className="text-black font-bold text-xl">
-              <img src="logo.png" alt="" />
+              <LogoMark size={30} />
             </span>
           </span>
           <span className="text-white font-bold text-lg tracking-wide">
-            Lerno AI
+            <Wordmark />
           </span>
         </div>
         <p className="text-gray-400 text-sm mb-4">
@@ -186,7 +187,7 @@ const Footer: React.FC = () => (
 
     {/* Copyright */}
     <div className="border-t border-[#232323] mt-10 pt-6 text-center text-gray-500 text-xs">
-      &copy; {new Date().getFullYear()} Lerno AI. All rights reserved.
+      &copy; {new Date().getFullYear()} ExplAInr. All rights reserved.
     </div>
   </footer>
 );

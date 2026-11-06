@@ -18,9 +18,9 @@ const LandingPage = () => {
 
   const projects = [
     {
-      title: "Transform Learning with Lerno",
+      title: "Transform Learning with ExplAInr",
       description:
-        "Lerno is an AI-powered learning platform that personalizes education like never before. Dive into interactive lessons, real-time feedback, and hands-on exercises designed to enhance your understanding.",
+        "ExplAInr is an AI-powered learning platform that personalizes education like never before. Dive into interactive lessons, real-time feedback, and hands-on exercises designed to enhance your understanding.",
     },
     {
       title: "AI-Powered Tutor at Your Fingertips",
@@ -45,7 +45,7 @@ const LandingPage = () => {
     {
       title: "Start Your Learning Journey Today!",
       description:
-        "Thousands of learners are already unlocking their potential with Lerno. Don't miss out!",
+        "Thousands of learners are already unlocking their potential with ExplAInr. Don't miss out!",
     },
   ];
 
@@ -73,7 +73,7 @@ const LandingPage = () => {
               <h1 className="text-4xl font-semibold text-white dark:text-white">
                 Learn Smarter with Interactive AI <br />
                 <span className="text-4xl md:text-[6rem] font-bold mt-1 leading-none">
-                  Try Lerno.ai Now
+                  Try ExplAInr Now
                 </span>
               </h1>
             </>
@@ -84,7 +84,7 @@ const LandingPage = () => {
             height={720}
             width={1400}
             className="mx-auto rounded-2xl object-cover h-full object-left-top"
-            alt="Lerno.ai Preview"
+            alt="ExplAInr preview"
           />
         </ContainerScroll>
       </div>
