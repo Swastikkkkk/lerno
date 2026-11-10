@@ -2,7 +2,7 @@
 
 Type a concept, get a short animated explainer back. ExplAInr plans the lesson as a storyboard, writes a Manim scene for each frame, renders them to video and plays them with narration. A chat tutor sits next to the video for follow-up questions.
 
-**Live:** [lerno-peach.vercel.app](https://lerno-peach.vercel.app) (frontend; video generation needs the Python backend running, see below)
+**Live:** [lerno-peach.vercel.app](https://lerno-peach.vercel.app) · **Backend:** [Hugging Face Space](https://huggingface.co/spaces/swastik23423/lerno-backend) (FastAPI + Manim, Docker). No paid keys: it uses a free LLM, or your own Gemini key if you add one.
 
 ![ExplAInr landing page](.github/assets/screenshot.jpg)
 
