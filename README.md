@@ -6,7 +6,7 @@ Type a concept, get a short animated explainer back. ExplAInr plans the lesson a
 
 ![ExplAInr landing page](.github/assets/screenshot.jpg)
 
-Won first place at Google Codeclash 2.0 (Gurugram, 1,000+ teams). First built at HackoWasp 7.0 by team Ctrl-Alt-Defeat (Suryansh Pratap Singh, Tejas Mehra, Swastik Dutt). [Pitch deck](https://www.figma.com/slides/2P1pYfOLMtQcbQfyhlG9fi/lerno.ai-CTRL-ALT-DEFEAT?node-id=0-239).
+Won first place at Google Codeclash 2.0 (Gurugram, 1,000+ teams). First built at HackoWasp 7.0 by team Ctrl-Alt-Defeat ([Suryansh Pratap Singh](https://github.com/suryansh04) @suryansh04, [Tejas Mehra](https://github.com/TejasMehra) @TejasMehra, [Swastik Dutt](https://github.com/Swastikkkkk) @Swastikkkkk). [Pitch deck](https://www.figma.com/slides/2P1pYfOLMtQcbQfyhlG9fi/lerno.ai-CTRL-ALT-DEFEAT?node-id=0-239).
 
 ## How it works
 
