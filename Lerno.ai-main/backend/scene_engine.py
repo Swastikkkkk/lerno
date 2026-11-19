@@ -76,7 +76,12 @@ def tex(s, color=FG, size=48):
 
 
 def looks_tex(s):
-    return bool(re.search(r"[\\^_]|\\frac|=", str(s))) and not re.search(r"[A-Za-z]{4,}\s+[A-Za-z]{4,}", str(s))
+    """Formula (MathTex) or sentence (Text)? Any real word means a sentence, unless it is clearly LaTeX."""
+    s = str(s)
+    words = re.findall(r"(?<![\\a-zA-Z])[A-Za-z]{3,}", re.sub(r"\\text\{[^}]*\}", "", s))
+    if re.search(r"\\[a-zA-Z]+|[\^_]", s):
+        return len(words) <= 2
+    return "=" in s and not words
 
 
 def fit(m, w=None, h=None):

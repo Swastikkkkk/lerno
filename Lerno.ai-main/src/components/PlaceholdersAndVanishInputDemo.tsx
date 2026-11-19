@@ -21,14 +21,13 @@ export default function PlaceholdersAndVanishInputDemo() {
     "Explain the Pythagorean Theorem with animation",
     'I am "audience"  teach me this "topic"?',
     "Show me how derivatives work with graphs",
-    "Give a visual explanation of linear transformations in 3D",
+    "How does a binary search tree find a number?",
   ];
   const loadingStates = [
-    { text: "Planning the lesson" },
-    { text: "Writing narration and questions" },
-    { text: "Animating each scene with Manim" },
-    { text: "Rendering the videos" },
-    { text: "Almost there, this takes a minute or two" },
+    { text: "Writing the lesson" },
+    { text: "Designing each scene" },
+    { text: "Animating with Manim" },
+    { text: "Almost there" },
   ];
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,7 +39,7 @@ export default function PlaceholdersAndVanishInputDemo() {
     if (!inputValue.trim()) return;
     setIsLoading(true);
     setError("");
-    setStage("Planning the lesson");
+    setStage("Writing the lesson");
 
     try {
       const job = await generateLesson(inputValue, (j) => setStage(j.stage));

@@ -10,7 +10,7 @@ No paid keys anywhere. With no key, the LLM work runs on Pollinations' free anon
 OpenAI-compatible API. Visitors can optionally paste their own free Gemini key (X-Gemini-Key header)
 for faster, steadier results; if Gemini hits its free quota we drop back to Pollinations.
 
-The LLM never writes Manim code. It describes each scene as a small JSON spec and scene_engine.py draws it
+One LLM call writes the whole lesson. It never writes Manim code: it describes each scene as a small JSON spec and scene_engine.py draws it
 with a fixed layout, so text and shapes never overlap and every scene renders.
 """
 import hashlib
@@ -99,6 +99,7 @@ class FreeQuota(Exception):
 render_slots = threading.Semaphore(int(os.getenv("RENDER_SLOTS", "3")))
 pool = ThreadPoolExecutor(max_workers=8)
 jobs: dict[str, dict] = {}
+recent: dict[str, str] = {}  # same request again -> reuse the finished lesson while its videos still exist
 jobs_lock = threading.Lock()
 
 app = FastAPI(title="ExplAInr")
@@ -206,33 +207,24 @@ def ask_json(prompt: str, key: str | None, **kw) -> dict:
 
 
 # ----------------------------------------------------------------------------- prompts
-PLAN = """You are planning a short animated lesson.
-Learner request: "{req}"
+LESSON = """You are making a short animated lesson. Learner request: "{req}"
 
-Work out who the learner is (default: curious high-school student) and the exact topic.
-Split the topic into exactly 3 scenes that build on each other. Each scene is one idea that can be drawn as
-ONE of these: a row of boxes or linked nodes, an array, a vertical stack, a tree, a cycle of stages, a small
-network, a function plot, a bar chart, an equation worked step by step, a two-column comparison, or a short
-bullet list. Prefer a real diagram over bullets. No quiz scenes.
+Work out who the learner is (default: curious high-school student) and the exact topic. Teach it in exactly
+3 scenes that build on each other, each one idea. You do NOT write code: you describe each scene as JSON and a
+layout engine draws it, so keep every on-screen text short. Prefer a real diagram over bullets.
 
-Return JSON:
-{{"topic": "...", "audience": "...",
-  "scenes": [{{"title": "short title", "idea": "one or two sentences on what this scene shows"}}]}}"""
-
-SCENE = """You are designing one scene of an animated lesson about "{topic}" for a {audience}.
-Scene {n} of {total}: "{title}". What it shows: {idea}
-
-You do NOT write code. You describe the scene as JSON and a layout engine draws it, so keep every text short.
 Return one JSON object:
-{{
-  "narration": "2 to 4 friendly sentences the narrator reads while the animation plays",
-  "question": "one multiple choice question that checks this scene",
-  "choices": ["4 short options", "plain text", "no letters", "in front"],
-  "correct_index": 0,
-  "visual": {{ ...one visual, see below... }},
-  "steps": [ ...3 to 7 steps that animate it in the order the narration talks about it... ],
-  "takeaway": "optional final one-line summary, max 8 words"
-}}
+{{"topic": "...", "audience": "...",
+  "scenes": [{{
+    "title": "2 to 4 word title",
+    "narration": "2 to 4 friendly sentences the narrator reads while this scene plays",
+    "question": "one multiple choice question that checks this scene",
+    "choices": ["4 short options", "plain text", "no letters", "in front"],
+    "correct_index": 0,
+    "visual": {{ ...one visual, see below... }},
+    "steps": [ ...3 to 6 steps that animate it in the order the narration talks about it... ],
+    "takeaway": "optional final line, max 8 words"
+  }}]}}
 
 VISUALS (pick the one that fits best):
 - {{"kind":"row","style":"boxes|nodes|cells|circles","items":["A","B","C"],"arrows":true,"terminal":"null","indices":false}}
@@ -307,7 +299,7 @@ def render(code: str, out_path: Path, cls: str = "Lesson") -> tuple[bool, str]:
         (work / "scene.py").write_text(code, encoding="utf-8")
         with render_slots:
             p = subprocess.run(
-                ["manim", "-ql", "--disable_caching", "--progress_bar", "none",
+                ["manim", "-qm", "--disable_caching", "--progress_bar", "none",
                  "--media_dir", str(work / "media"), "scene.py", cls],
                 cwd=work, capture_output=True, text=True, timeout=RENDER_TIMEOUT,
             )
@@ -424,70 +416,63 @@ def update(job_id: str, **kw):
         jobs[job_id].update(kw)
 
 
-def build_scene(job_id: str, plan: dict, i: int, s: dict, key: str | None) -> dict:
-    n, total = i + 1, len(plan["scenes"])
-    d = {}
-    try:
-        for _ in range(2):  # one retry if the reply can't be parsed
-            try:
-                d = ask_json(SCENE.format(topic=plan["topic"], audience=plan["audience"], n=n, total=total,
-                                          title=s["title"], idea=s["idea"]), key, max_tokens=3000)
-            except (FreeQuota, BadKey, NeedKey):
-                raise
-            except Exception as e:
-                print(f"scene {n} reply unusable: {e}", flush=True)
-                d = {}
-            if d.get("visual"):
-                break
-    except FreeQuota:
-        raise
-    except Exception as e:
-        print(f"scene {n} generation failed: {e}", flush=True)
-    narration = str(d.get("narration") or s["idea"])
+def build_scene(job_id: str, n: int, total: int, d: dict) -> dict:
+    title = _short(d.get("title"), 44) or f"Part {n}"
+    narration = str(d.get("narration") or title)
     choices = [str(c) for c in (d.get("choices") or [])][:4]
     if len(choices) < 2:
         choices = ["I understand this part", "I need to see it again"]
+    ci = d.get("correct_index", 0)
     scene = {
         "scene_number": n,
-        "title": s["title"],
+        "title": title,
         "narration": narration,
         "assessment": {"multiple_choice": {
-            "question": d.get("question") or f"Did this explain {s['title'].lower()}?",
+            "question": d.get("question") or f"Did this explain {title.lower()}?",
             "choices": choices,
-            "correct_index": int(d.get("correct_index", 0)) if str(d.get("correct_index", 0)).isdigit() else 0,
+            "correct_index": int(ci) if str(ci).isdigit() and int(ci) < len(choices) else 0,
         }},
         "video_url": None,
     }
-
     out = MEDIA / job_id / f"Scene{n}.mp4"
-    spec = normalize_spec(d, s["title"], narration)
+    spec = normalize_spec(d, title, narration)
     ok, err = render(spec_code(spec), out)
-    if not ok:  # the engine survives bad steps; this is for anything else: drop the steps, then go plain
+    if not ok:  # the engine skips bad steps itself; this catches anything else: no steps, then plain text
         print(f"scene {n} render failed: {err[-600:]}", flush=True)
         ok, err = render(spec_code({**spec, "steps": []}), out)
     if not ok:
-        ok, _ = render(safe_scene(n, s["title"], narration), out)
+        ok, _ = render(safe_scene(n, title, narration), out)
     if ok:
         scene["video_url"] = f"/media/{job_id}/Scene{n}.mp4"
     with jobs_lock:
         jobs[job_id]["done_scenes"] += 1
         done = jobs[job_id]["done_scenes"]
-    update(job_id, stage=f"Rendered scene {done} of {total}", progress=0.2 + 0.8 * done / total)
+    update(job_id, stage=f"Animated scene {done} of {total}", progress=0.35 + 0.65 * done / total)
     return scene
 
 
 def run_job(job_id: str, req: str, key: str | None):
     try:
-        update(job_id, status="running", stage="Planning the lesson", progress=0.05)
-        plan = ask_json(PLAN.format(req=req.replace('"', "'")[:500]), key)
-        plan["scenes"] = [s for s in plan.get("scenes", []) if s.get("title")][:3]
-        if not plan["scenes"]:
+        update(job_id, status="running", stage="Writing the lesson", progress=0.05)
+        lesson = {}
+        for _ in range(2):  # one LLM call per lesson; retry once if the reply is unusable
+            try:
+                lesson = ask_json(LESSON.format(req=req.replace('"', "'")[:500]), key, max_tokens=8000)
+            except (FreeQuota, BadKey, NeedKey):
+                raise
+            except Exception as e:
+                print(f"lesson reply unusable: {e}", flush=True)
+            if [x for x in lesson.get("scenes", []) if isinstance(x, dict) and x.get("title")]:
+                break
+        scenes = [x for x in lesson.get("scenes", []) if isinstance(x, dict) and x.get("title")][:3]
+        if not scenes:
             raise RuntimeError("Could not plan a lesson for that request. Try rephrasing it.")
-        update(job_id, topic=plan.get("topic", req), audience=plan.get("audience", ""),
-               stage="Writing and animating scenes", progress=0.2)
-        futures = [pool.submit(build_scene, job_id, plan, i, s, key) for i, s in enumerate(plan["scenes"])]
-        scenes = [f.result() for f in futures]
-        update(job_id, status="done", stage="Ready", progress=1.0, scenes=scenes)
+        update(job_id, topic=lesson.get("topic", req), audience=lesson.get("audience", ""),
+               stage="Animating scenes", progress=0.35)
+        futures = [pool.submit(build_scene, job_id, i + 1, len(scenes), x) for i, x in enumerate(scenes)]
+        update(job_id, status="done", stage="Ready", progress=1.0, scenes=[f.result() for f in futures])
+        with jobs_lock:
+            recent[cache_key(req)] = job_id
     except NeedKey:
         update(job_id, status="error", stage="Failed", error="Add your Gemini API key to generate lessons.", code="NEED_KEY")
     except FreeQuota as e:
@@ -496,6 +481,10 @@ def run_job(job_id: str, req: str, key: str | None):
         update(job_id, status="error", stage="Failed", error=str(e), code="BAD_KEY")
     except Exception as e:
         update(job_id, status="error", stage="Failed", error=str(e))
+
+
+def cache_key(req: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", req.lower()).strip()
 
 
 def sweep():
@@ -547,6 +536,10 @@ def generate(body: GenerateIn, x_gemini_key: str | None = Header(default=None)):
     req = body.prompt.strip()
     if not req:
         raise HTTPException(400, "Tell me what you want to learn.")
+    with jobs_lock:
+        prev = jobs.get(recent.get(cache_key(req), ""))
+        if prev and prev["status"] == "done":
+            return {"job_id": prev["id"]}
     job_id = uuid.uuid4().hex[:12]
     with jobs_lock:
         jobs[job_id] = {"id": job_id, "status": "queued", "stage": "Queued", "progress": 0.0,
