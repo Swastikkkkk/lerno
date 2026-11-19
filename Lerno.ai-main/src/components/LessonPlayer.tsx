@@ -120,7 +120,8 @@ export default function LessonPlayer({ src, audio, captions, emptyText }: Props)
     if (!el || !el.duration) return;
     el.currentTime = Math.max(0, Math.min(el.duration, frac * el.duration));
     const v = video.current;
-    if (audio && v && v.duration) v.currentTime = el.currentTime % v.duration;
+    // scenes are paced to the narration; if the voice runs longer the video just holds its last frame
+    if (audio && v && v.duration) v.currentTime = Math.min(el.currentTime, v.duration - 0.05);
     setT(el.currentTime);
   };
 
@@ -173,7 +174,6 @@ export default function LessonPlayer({ src, audio, captions, emptyText }: Props)
           key={src}
           src={src}
           muted
-          loop={!!audio}
           playsInline
           autoPlay
           onClick={toggle}

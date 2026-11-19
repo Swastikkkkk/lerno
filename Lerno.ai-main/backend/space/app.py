@@ -1,4 +1,4 @@
-"""HF Space entry (Gradio SDK, ZeroGPU free tier). Copy ../main.py next to this file.
+"""HF Space entry (Gradio SDK, ZeroGPU free tier). Copy ../main.py and ../scene_engine.py next to this file.
 Gradio owns the server there, so ExplAInr's FastAPI routes are added to the app Gradio creates,
 plus open CORS for the Vercel frontend."""
 import os

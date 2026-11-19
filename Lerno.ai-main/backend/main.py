@@ -8,9 +8,10 @@ GET  /health
 
 No paid keys anywhere. With no key, the LLM work runs on Pollinations' free anonymous
 OpenAI-compatible API. Visitors can optionally paste their own free Gemini key (X-Gemini-Key header)
-for faster, steadier results; if Gemini hits its free quota we drop back to Pollinations. Manim scenes that fail to
-render are sent back to Gemini with the error, and a guaranteed-safe scene is used as a
-last resort, so a lesson always finishes.
+for faster, steadier results; if Gemini hits its free quota we drop back to Pollinations.
+
+The LLM never writes Manim code. It describes each scene as a small JSON spec and scene_engine.py draws it
+with a fixed layout, so text and shapes never overlap and every scene renders.
 """
 import hashlib
 import json
@@ -69,7 +70,6 @@ MEDIA = Path(os.getenv("MEDIA_DIR", "/tmp/lerno-media"))
 MEDIA.mkdir(parents=True, exist_ok=True)
 JOB_TTL = 3 * 60 * 60          # forget jobs and their videos after 3 hours
 RENDER_TIMEOUT = 150           # seconds per manim run
-FIX_ATTEMPTS = 2
 
 _clients: dict[str, genai.Client] = {}
 free_slots = threading.Semaphore(int(os.getenv("FREE_LLM_SLOTS", "1")))  # anonymous tier allows ~1 request at a time
@@ -201,19 +201,6 @@ def _loads(text: str) -> dict:
         return json.loads(re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", body))
 
 
-def split_scene(raw: str) -> dict:
-    """Scene replies are a JSON object followed by a ```python block; tolerate the old all-JSON shape too."""
-    code_m = re.search(r"```(?:python)?\s*(.*?)```", raw, re.S)
-    meta_part = raw[:code_m.start()] if code_m else raw
-    try:
-        d = _loads(meta_part)
-    except Exception:
-        d = {}
-    if code_m:
-        d["code"] = code_m.group(1)
-    return d
-
-
 def ask_json(prompt: str, key: str | None, **kw) -> dict:
     return _loads(ask(prompt, key, as_json=True, **kw))
 
@@ -223,66 +210,64 @@ PLAN = """You are planning a short animated lesson.
 Learner request: "{req}"
 
 Work out who the learner is (default: curious high-school student) and the exact topic.
-Split the topic into exactly 3 scenes. Each scene is one idea that can be shown with simple
-2D shapes, arrows, graphs, numbers and short text in under 15 seconds. No quiz scenes.
+Split the topic into exactly 3 scenes that build on each other. Each scene is one idea that can be drawn as
+ONE of these: a row of boxes or linked nodes, an array, a vertical stack, a tree, a cycle of stages, a small
+network, a function plot, a bar chart, an equation worked step by step, a two-column comparison, or a short
+bullet list. Prefer a real diagram over bullets. No quiz scenes.
 
 Return JSON:
 {{"topic": "...", "audience": "...",
   "scenes": [{{"title": "short title", "idea": "one or two sentences on what this scene shows"}}]}}"""
 
-SCENE = """You are writing one scene of an animated lesson about "{topic}" for a {audience}.
+SCENE = """You are designing one scene of an animated lesson about "{topic}" for a {audience}.
 Scene {n} of {total}: "{title}". What it shows: {idea}
 
-Reply in exactly two parts:
-1. A JSON object with:
-   "narration": 2 to 4 friendly sentences a narrator reads while the animation plays,
-   "question": one multiple choice question that checks this scene,
-   "choices": exactly 4 short answer options, plain text, no letters in front,
-   "correct_index": index (0-3) of the right option.
-2. Then the complete Manim Community v0.19 Python file in a ```python code block (NOT inside the JSON).
+You do NOT write code. You describe the scene as JSON and a layout engine draws it, so keep every text short.
+Return one JSON object:
+{{
+  "narration": "2 to 4 friendly sentences the narrator reads while the animation plays",
+  "question": "one multiple choice question that checks this scene",
+  "choices": ["4 short options", "plain text", "no letters", "in front"],
+  "correct_index": 0,
+  "visual": {{ ...one visual, see below... }},
+  "steps": [ ...3 to 7 steps that animate it in the order the narration talks about it... ],
+  "takeaway": "optional final one-line summary, max 8 words"
+}}
 
-Rules for "code":
-- Start with `from manim import *` and define exactly one class `Scene{n}(LernoScene)` with `construct`.
-- LAYOUT IS HANDLED FOR YOU. Use these helpers, never position text by hand:
-    self.set_title("Short title")                      # top strip
-    d = VGroup(...).arrange(RIGHT, buff=0.8)            # build the diagram as ONE VGroup, centered at ORIGIN
-    self.show(d)                                        # fits and centers it, animates Create
-    self.label(d[2], "New tail", DOWN)                 # short label next to an object; it finds a free side
-    self.label(d[3], r"k=2", UP, tex=True)
-    self.note(r"k \bmod n = 2")                        # formulas go to the bottom row (max 3)
-    self.clear_labels()
-  Animate changes with self.play(...) on parts of d (Indicate, Transform, d[i].animate.set_color(...), GrowArrow).
-- Labels: 1 to 4 words each, at most 4 per scene. Formulas only through self.note.
-- Keep the screen calm: at most 6 separate things visible at once. Before a new idea, FadeOut the old group.
-  Build rows with VGroup(...).arrange(RIGHT, buff=0.6) and stacks with .arrange(DOWN, buff=0.5): never place
-  two shapes by hand on top of or touching each other. Everything is centered by default; don't shift it aside.
-- Use only: Text, MathTex, Circle, Square, Rectangle, RoundedRectangle, Dot, Line, Arrow, Vector, NumberPlane,
-  Axes, VGroup, Brace, SurroundingRectangle, and animations Create, Write, FadeIn, FadeOut, Transform,
-  GrowArrow, Indicate, self.wait.
-- No images, SVGs, sounds, external files, updaters, ValueTracker, always_redraw or 3D.
-- Plain ASCII inside Text(). In MathTex wrap words in \\text{{}}, e.g. r"\\text{{new tail}}.next = \\text{{null}}".
-- Make the diagram big and clear: few, large shapes (circles radius 0.5+, squares side 0.8+), font_size 32+ inside shapes.
-- Total runtime 8 to 14 seconds. End with self.wait(1).
-"""
+VISUALS (pick the one that fits best):
+- {{"kind":"row","style":"boxes|nodes|cells|circles","items":["A","B","C"],"arrows":true,"terminal":"null","indices":false}}
+    nodes = linked-list nodes with a pointer cell; cells = array (touching boxes, set "indices":true for 0,1,2...);
+    boxes with arrows = a pipeline / process / timeline. Max 7 items, each item max 12 characters.
+- {{"kind":"stack","items":["top item","...","bottom item"]}}  (call stack, layers, stack data structure)
+- {{"kind":"tree","items":[{{"id":"a","text":"8"}},{{"id":"b","text":"3","parent":"a"}}]}}  (max 9 nodes)
+- {{"kind":"cycle","items":["Stage 1","Stage 2","Stage 3","Stage 4"]}}  (3 to 6 stages that loop)
+- {{"kind":"network","items":[{{"id":"A","text":"A"}}],"edges":[["A","B"]],"arrows":false}}  (graphs, max 7 nodes)
+- {{"kind":"plot","x":[-3,3],"functions":[{{"expr":"x^2","label":"y = x^2"}}],"x_label":"x","y_label":"y"}}
+    expr uses x, numbers, + - * / ^ ( ), sin cos tan exp log sqrt abs pi. Max 3 functions.
+- {{"kind":"bars","items":[{{"label":"A","value":5}}]}}  (max 8 bars; sorting, comparisons, data)
+- {{"kind":"equation","lines":["a^2 + b^2 = c^2","3^2 + 4^2 = c^2","c = 5"]}}  (LaTeX, max 4 lines, one per step)
+- {{"kind":"compare","left":{{"title":"X","points":["...","..."]}},"right":{{"title":"Y","points":["..."]}}}}  (max 4 points each)
+- {{"kind":"bullets","points":["...","..."]}}  (last resort, max 4 points, max 6 words each)
 
-FIX = """This Manim Community v0.19 file failed to render.
-
-```python
-{code}
-```
-
-Error (last lines):
-```
-{error}
-```
-
-Reply with only the corrected complete file in one ```python code block. Keep the class name {cls}
-and keep using the LernoScene helpers (set_title, show, label, note, clear_labels).
-Simplify anything risky: prefer Text over MathTex, drop anything not in the basic Manim API."""
+STEPS (target = item index from 0, or the item's id/text; indexes shift after add/remove):
+- {{"op":"highlight","target":1}}            colour an item (optional "color": good|bad|accent)
+- {{"op":"trace","targets":[0,1,2]}}         walk along items one by one (traversal, search, flow)
+- {{"op":"label","target":0,"text":"head"}}  1 to 3 words next to an item; reusing the same text moves it
+- {{"op":"change","target":2,"text":"25"}}   change an item's value (bars: "value": 25)
+- {{"op":"add","text":"15","at":1}}          insert into row/stack/cycle ("parent":"id" for tree)
+- {{"op":"remove","target":1}}
+- {{"op":"swap","targets":[0,1]}}            row or bars (sorting)
+- {{"op":"connect","from":"A","to":"B"}}     network or tree
+- {{"op":"draw","f":0}} / {{"op":"dot","f":0,"x":2,"text":"(2, 4)"}} / {{"op":"area","f":0,"from":0,"to":2}}   plot only
+- {{"op":"next"}}                            equation, compare, bullets: reveal the next line
+- {{"op":"note","text":"k mod n = 2"}}       one short line under the diagram (max 10 words or one formula)
+Any step may also carry "note". Labels: at most 4 per scene. Everything must fit the idea of THIS scene.
+Notes and labels appear on screen for the learner: write the idea ("largest value ends up last"), never
+describe the animation ("checkmark appears", "arrow moves"). "terminal" is only for linked lists."""
 
 
 def safe_scene(n: int, title: str, narration: str) -> str:
-    """A scene that always renders: title plus the narration split into short lines."""
+    """Plain Manim that always renders: title plus the narration split into short lines."""
     words = re.sub(r"[^A-Za-z0-9 ,.?!'\-]", "", narration).split()
     lines, cur = [], ""
     for w in words:
@@ -298,14 +283,13 @@ def safe_scene(n: int, title: str, narration: str) -> str:
     body = ",\n            ".join(f'Text("{l}", font_size=30)' for l in lines) or 'Text("", font_size=30)'
     return f'''from manim import *
 
-class Scene{n}(Scene):
+class Lesson(Scene):
     def construct(self):
-        title = Text("{t}", font_size=44, weight=BOLD).to_edge(UP)
-        line = Line(LEFT * 4, RIGHT * 4).next_to(title, DOWN, buff=0.3)
+        title = Text("{t}", font_size=40, weight=BOLD).move_to(UP * 3.3)
         body = VGroup(
             {body}
-        ).arrange(DOWN, buff=0.35).next_to(line, DOWN, buff=0.6)
-        self.play(Write(title), Create(line))
+        ).arrange(DOWN, buff=0.35).move_to(UP * 0.6)
+        self.play(Write(title))
         for row in body:
             self.play(FadeIn(row, shift=UP * 0.2), run_time=0.8)
         self.wait(2)
@@ -313,7 +297,11 @@ class Scene{n}(Scene):
 
 
 # ----------------------------------------------------------------------------- render
-def render(code: str, cls: str, out_path: Path) -> tuple[bool, str]:
+ENGINE = (Path(__file__).resolve().parent / "scene_engine.py").read_text(encoding="utf-8")
+KINDS = {"row", "stack", "tree", "cycle", "network", "plot", "bars", "equation", "compare", "bullets"}
+
+
+def render(code: str, out_path: Path, cls: str = "Lesson") -> tuple[bool, str]:
     work = Path(tempfile.mkdtemp(prefix="lerno-"))
     try:
         (work / "scene.py").write_text(code, encoding="utf-8")
@@ -330,356 +318,104 @@ def render(code: str, cls: str, out_path: Path) -> tuple[bool, str]:
             return True, ""
         return False, (p.stderr or p.stdout)[-2500:]
     except subprocess.TimeoutExpired:
-        return False, f"Render took longer than {RENDER_TIMEOUT}s. Make the scene shorter and simpler."
+        return False, f"Render took longer than {RENDER_TIMEOUT}s."
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
 
-# Injected into every generated scene: before each play() it moves new labels off anything they
-# would overlap, then scales/shifts everything on screen so nothing leaves the frame.
-LERNO_BASE = r"""
-import re
-from manim.animation.animation import prepare_animation
+def spec_code(spec: dict) -> str:
+    return ENGINE + "\nimport json as _json\nSPEC = _json.loads(" + repr(json.dumps(spec)) + ")\n"
 
 
-class LernoScene(Scene):
-    # zones (Manim units, frame is ~14.2 x 8): title strip on top, diagram in the middle, notes row at the bottom
-    _W, _H = 13.0, 7.2
-    TOP_Y, DIAGRAM_TOP, DIAGRAM_BOTTOM, NOTES_Y = 3.3, 2.4, -1.7, -2.75
-    GAP = 0.45          # minimum clear space between separate elements (~1 cm on a laptop screen)
-    SHAPE_GAP = 0.25    # between shapes the code placed itself
+def narration_seconds(text: str) -> float:
+    # ~2.5 words a second for Murf and browser voices, plus a beat at the end
+    return max(9.0, min(26.0, len(text.split()) / 2.5 + 1.5))
 
-    def setup(self):
-        self._title = None
-        self._diagram = None
-        self._labels_on = []
-        self._notes = VGroup()
 
-    # ---------------------------------------------------------------- helpers for the generated code
-    def set_title(self, text):
-        t = Text(text, font_size=38, weight=BOLD)
-        t.scale_to_fit_width(min(t.width, 11.5)).move_to(UP * self.TOP_Y)
-        if self._title is None:
-            self.play(Write(t), run_time=0.8)
+def _short(v, n=40):
+    return re.sub(r"\s+", " ", str(v if v is not None else "")).strip()[:n]
+
+
+def normalize_spec(d: dict, title: str, narration: str) -> dict:
+    """Clamp whatever the LLM sent into something the engine can always draw."""
+    v = d.get("visual") if isinstance(d.get("visual"), dict) else {}
+    kind = str(v.get("kind", "")).lower().strip()
+    kind = {"list": "row", "array": "row", "linkedlist": "row", "linked_list": "row", "pipeline": "row",
+            "flow": "row", "timeline": "row", "graph": "network", "chart": "bars", "math": "equation",
+            "comparison": "compare", "text": "bullets"}.get(kind, kind)
+    if kind not in KINDS:
+        kind = "bullets"
+    out = {"kind": kind}
+    if kind in ("row", "stack", "cycle"):
+        items = [_short(x.get("text") if isinstance(x, dict) else x, 14) for x in (v.get("items") or [])][:7]
+        out["items"] = [x for x in items if x] or [title[:14]]
+        if kind == "cycle" and len(out["items"]) < 3:
+            kind = out["kind"] = "row"
+        out["style"] = str(v.get("style", "boxes")).lower()
+        for k in ("arrows", "indices"):
+            if k in v:
+                out[k] = bool(v[k])
+        if v.get("terminal") and kind == "row" and out["style"] == "nodes":
+            out["terminal"] = _short(v["terminal"], 8)
+    elif kind in ("tree", "network"):
+        items = []
+        for x in (v.get("items") or [])[:9]:
+            if isinstance(x, dict):
+                items.append({"id": _short(x.get("id") or x.get("text"), 20), "text": _short(x.get("text") or x.get("id"), 10),
+                              "parent": _short(x.get("parent"), 20) or None})
+            elif x is not None:
+                items.append({"id": _short(x, 20), "text": _short(x, 10)})
+        out["items"] = items or [{"id": "a", "text": title[:10]}]
+        out["edges"] = [[_short(e[0], 20), _short(e[1], 20)] for e in (v.get("edges") or [])
+                        if isinstance(e, (list, tuple)) and len(e) >= 2][:12]
+        if "arrows" in v:
+            out["arrows"] = bool(v["arrows"])
+        out["style"] = str(v.get("style", "circles" if kind == "network" else "boxes")).lower()
+    elif kind == "plot":
+        fns = [{"expr": _short(f.get("expr"), 60), "label": _short(f.get("label") or f.get("expr"), 30)}
+               for f in (v.get("functions") or []) if isinstance(f, dict) and f.get("expr")][:3]
+        if not fns:
+            kind, out = "bullets", {"kind": "bullets"}
         else:
-            self.play(Transform(self._title, t), run_time=0.6)
-            t = self._title
-        self._title = t
-        return t
-
-    def show(self, diagram, anim=Create, run_time=1.2):
-        if self._diagram is not None and self._diagram in self.mobjects:
-            self.play(FadeOut(self._diagram), *[FadeOut(l) for l in self._labels_on], run_time=0.5)
-            self._labels_on = []
-        self._spread(diagram)
-        self._fit_diagram(diagram)
-        self._diagram = diagram
-        self.play(anim(diagram), run_time=run_time)
-        return diagram
-
-    def label(self, target, text, direction=UP, tex=False, color=WHITE):
-        lab = MathTex(text, color=color) if tex else Text(text, font_size=26, color=color)
-        lab.scale_to_fit_height(min(lab.height, 0.42))
-        self._place(lab, target, direction)
-        self._labels_on.append(lab)
-        self.play(FadeIn(lab, shift=direction * 0.15), run_time=0.5)
-        return lab
-
-    def note(self, text, tex=True):
-        plain = re.sub(r"\\\\text\{([^}]*)\}", r"\1", text)
-        sentence = len(re.findall(r"[A-Za-z]{3,}", plain)) >= 3 and not re.search(r"[\\^_]", plain)
-        if sentence or not tex:
-            n = Text(plain.replace("\\", ""), font_size=28)
+            out["functions"] = fns
+            try:
+                x = [float(a) for a in v.get("x", [-5, 5])][:2]
+                out["x"] = x if x[0] < x[1] else [-5, 5]
+            except Exception:
+                out["x"] = [-5, 5]
+            try:
+                y = [float(a) for a in v["y"]][:2]
+                if y[0] < y[1]:
+                    out["y"] = y
+            except Exception:
+                pass
+            out["x_label"], out["y_label"] = _short(v.get("x_label", "x"), 12), _short(v.get("y_label", "y"), 12)
+    elif kind == "bars":
+        items = []
+        for x in (v.get("items") or [])[:8]:
+            if isinstance(x, dict):
+                try:
+                    items.append({"label": _short(x.get("label"), 12), "value": float(x.get("value", 0))})
+                except Exception:
+                    pass
+        if items:
+            out["items"] = items
         else:
-            n = MathTex(text)
-        n.scale_to_fit_height(min(n.height, 0.5))
-        if n.width > 11:
-            n.scale_to_fit_width(11)
-        if len(self._notes) >= 2 or (len(self._notes) == 1 and self._notes[0].width + n.width > 10.5):
-            old = self._notes[0]
-            self._notes.remove(old)
-            self.play(FadeOut(old), run_time=0.3)
-        self._notes.add(n)
-        target = self._notes.copy().arrange(RIGHT, buff=1.0).move_to(UP * self.NOTES_Y)
-        if target.width > 12:
-            target.scale_to_fit_width(12)
-        if target.height < 0.3:
-            target.scale_to_fit_height(0.3)
-        anims = [m.animate.move_to(t.get_center()).scale(t.height / max(m.height, 1e-3)) for m, t in zip(self._notes[:-1], target[:-1])]
-        n.move_to(target[-1]).scale(target[-1].height / max(n.height, 1e-3))
-        self.play(*anims, FadeIn(n, shift=UP * 0.15), run_time=0.6)
-        return n
-
-    def clear_labels(self):
-        if self._labels_on:
-            self.play(*[FadeOut(l) for l in self._labels_on], run_time=0.4)
-        self._labels_on = []
-
-    # ---------------------------------------------------------------- geometry
-    @staticmethod
-    def _box(m):
-        return m.get_left()[0], m.get_right()[0], m.get_bottom()[1], m.get_top()[1]
-
-    def _hits(self, a, b, pad=0.12):
-        l1, r1, b1, t1 = self._box(a)
-        l2, r2, b2, t2 = self._box(b)
-        return l1 < r2 + pad and l2 < r1 + pad and b1 < t2 + pad and b2 < t1 + pad
-
-    def _contains(self, a, b, slack=0.05):
-        l1, r1, b1, t1 = self._box(a)
-        l2, r2, b2, t2 = self._box(b)
-        return l1 <= l2 + slack and r2 <= r1 + slack and b1 <= b2 + slack and t2 <= t1 + slack
-
-    @staticmethod
-    def _is_connector(m):
-        return isinstance(m, (Line, Arrow, DashedLine, Brace, Vector)) or type(m).__name__ in ("CurvedArrow", "DoubleArrow", "Arc", "ArcBetweenPoints")
-
-    @staticmethod
-    def _is_highlight(m):
-        # an empty outline (SurroundingRectangle, a ring around a node): meant to sit on top of something
-        try:
-            return isinstance(m, VMobject) and not m.submobjects and m.get_fill_opacity() < 0.05 and not isinstance(m, (Text, MathTex, Tex))
-        except Exception:
-            return False
-
-    def _is_text(self, m):
-        return isinstance(m, (Text, MarkupText, MathTex, Tex)) or (
-            isinstance(m, VGroup) and len(m) > 0 and all(isinstance(x, (Text, MarkupText, MathTex, Tex)) for x in m))
-
-    def _parts(self, m):
-        # a group is judged by its pieces, so a label can sit next to one node of a list
-        subs = [s for s in m.submobjects if s.width + s.height > 0.05] if isinstance(m, (VGroup, Group)) and not self._is_text(m) else []
-        return subs if len(subs) > 1 else [m]
-
-    def _inside(self, m):
-        l, r, b, t = self._box(m)
-        return l > -self._W / 2 and r < self._W / 2 and b > -3.7 and t < self.TOP_Y - 0.35
-
-    # ---------------------------------------------------------------- layout internals
-    def _spread(self, d):
-        # siblings that partly overlap (not one inside another) get re-laid out in a row or grid with a real gap
-        kids = [k for k in d.submobjects if not self._is_connector(k)]
-        if len(kids) < 2 or len(kids) != len(d.submobjects):
-            return  # connectors depend on the original positions; leave those layouts alone
-        def overlap(a, b):  # share of the smaller box that is covered; touching cells (arrays) score ~0
-            l1, r1, b1, t1 = self._box(a)
-            l2, r2, b2, t2 = self._box(b)
-            w, h = min(r1, r2) - max(l1, l2), min(t1, t2) - max(b1, b2)
-            if w <= 0 or h <= 0:
-                return 0.0
-            small = min((r1 - l1) * (t1 - b1), (r2 - l2) * (t2 - b2)) or 1e-6
-            return w * h / small
-        clash = any(overlap(a, b) > 0.12 and not self._contains(a, b) and not self._contains(b, a)
-                    for i, a in enumerate(kids) for b in kids[i + 1:])
-        if not clash:
-            return
-        xs = [k.get_center()[0] for k in kids]
-        ys = [k.get_center()[1] for k in kids]
-        wide = (max(xs) - min(xs)) >= (max(ys) - min(ys))  # keep the direction the code was going for
-        if not wide:
-            kids.sort(key=lambda k: -k.get_center()[1])
-            d.submobjects = kids
-        else:
-            kids.sort(key=lambda k: k.get_center()[0])
-            d.submobjects = kids
-        if len(kids) <= 6:
-            d.arrange(RIGHT if wide else DOWN, buff=self.GAP + 0.15)
-        else:
-            d.arrange_in_grid(buff=self.GAP + 0.15)
-
-    def _fit_diagram(self, d):
-        h_room = self.DIAGRAM_TOP - self.DIAGRAM_BOTTOM - 1.0  # leave space for labels above/below
-        k = min(10.0 / max(d.width, 1e-3), h_room / max(d.height, 1e-3), 2.2)
-        d.scale(k)
-        d.move_to(UP * (self.DIAGRAM_TOP + self.DIAGRAM_BOTTOM) / 2)
-
-    def _obstacles(self, exclude):
-        obs = []
-        for o in self.mobjects:
-            if o is exclude or self._is_connector(o):
-                continue
-            obs += self._parts(o)
-        return obs
-
-    def _place(self, lab, target, direction):
-        dirs = [direction, UP, DOWN, RIGHT, LEFT, UR, UL, DR, DL]
-        seen, order = set(), []
-        for d in dirs:
-            k = tuple(np.round(d, 2))
-            if k not in seen:
-                seen.add(k)
-                order.append(d)
-        obs = [o for o in self._obstacles(lab) if o is not target and o not in target.get_family()]
-        for buff in (0.25, 0.5, 0.8):
-            for d in order:
-                lab.next_to(target, d, buff=buff)
-                if self._inside(lab) and not any(self._hits(lab, o, pad=self.GAP * 0.6) for o in obs):
-                    return
-        lab.next_to(target, direction, buff=0.25)
-
-    def _free(self, m, obs, pad):
-        return not any(self._hits(m, o, pad=pad) for o in obs if o is not m)
-
-    def _nudge(self, m, obs, pad):
-        # move m to the closest free spot around where the code put it; shrink it a little if nothing fits
-        if self._free(m, obs, pad):
-            return
-        home = m.get_center().copy()
-        for shrink in (1.0, 0.85, 0.7):
-            if shrink < 1.0:
-                m.move_to(home).scale(shrink)
-            sx, sy = m.width + pad, m.height + pad
-            for step in (1, 2, 3, 4):
-                for d in (DOWN, UP, RIGHT, LEFT, DR, DL, UR, UL):
-                    m.move_to(home + np.array([d[0] * sx, d[1] * sy, 0]) * step * 0.6)
-                    if self._inside(m) and self._free(m, obs, pad):
-                        return
-        m.move_to(home)
-
-    def _tidy(self, anims):
-        # safety net for every play(): gaps between elements, wide things centered, nothing outside the frame
-        try:
-            keep = {id(x) for x in [self._title, self._diagram] + self._labels_on + list(self._notes) if x is not None}
-            placed_now = []
-            todo = []
-            for a in anims:
-                m = getattr(a, "mobject", None)
-                if m is None or isinstance(a, FadeOut):
-                    continue
-                t = getattr(a, "target_mobject", None)
-                if t is not None and t is not m and self._is_text(t) and t not in self.mobjects:
-                    todo.append((t, m))  # text that something is turning into: place it like new text
-                if m in self.mobjects or id(m) in keep or self._is_connector(m) or self._is_highlight(m):
-                    continue
-                todo.append((m, None))
-            for m, source in todo:
-                if self._is_text(m) and m.height < 0.26:
-                    m.scale_to_fit_height(0.26)  # never smaller than readable
-                if self._is_text(m) and source is None:
-                    for o in list(self.mobjects):  # same spot: an updated value replaces the old one
-                        if o is not m and o is not source and id(o) not in keep and self._is_text(o) and self._hits(m, o, pad=0.02) \
-                                and abs(o.get_center()[1] - m.get_center()[1]) < 0.15 and abs(o.get_center()[0] - m.get_center()[0]) < 0.5:
-                            self.remove(o)
-                else:
-                    if isinstance(m, (VGroup, Group)):
-                        c0 = m.get_center().copy()
-                        self._spread(m)  # pieces drawn on top of each other get a real gap
-                        m.move_to(c0)
-                    others = [o for o in self.mobjects if o is not self._title and not self._is_text(o) and not self._is_connector(o)]
-                    if not others and abs(m.get_center()[0]) > 0.6:
-                        m.set_x(0)  # first thing on screen: center it
-                skip = set(id(x) for x in source.get_family()) if source is not None else set()
-                obs = []
-                for o in self._obstacles(m) + placed_now:
-                    if id(o) in skip:
-                        continue
-                    if self._is_text(o) and self._is_text(m):
-                        obs.append(o)  # two texts never share space
-                        continue
-                    elif (self._contains(o, m) and o.width * o.height > 1.6 * m.width * m.height) or \
-                            (self._contains(m, o) and m.width * m.height > 1.6 * o.width * o.height):
-                        continue  # text inside its box, box around its content: intentional
-                    obs.append(o)
-                self._nudge(m, obs, self.GAP if self._is_text(m) else self.SHAPE_GAP)
-                placed_now.append(m)
-            every = list(self.mobjects)
-            for a in anims:
-                m = getattr(a, "mobject", None)
-                if m is not None and not isinstance(a, FadeOut) and m not in every:
-                    every.append(m)
-                t = getattr(a, "target_mobject", None)
-                if t is not None:
-                    every.append(t)
-            if not every:
-                return
-            g = Group(*every)
-            k = min(1.0, self._W / max(g.width, 1e-3), 7.4 / max(g.height, 1e-3))
-            if k < 1.0:
-                c = g.get_center()
-                for m in every:
-                    m.scale(k, about_point=c)
-                g = Group(*every)
-            dx = max(0.0, -self._W / 2 - g.get_left()[0]) - max(0.0, g.get_right()[0] - self._W / 2)
-            dy = max(0.0, -3.7 - g.get_bottom()[1]) - max(0.0, g.get_top()[1] - 3.7)
-            if dx or dy:
-                for m in every:
-                    m.shift(RIGHT * dx + UP * dy)
-        except Exception:
-            pass
-
-    def _settle_moves(self, anims):
-        # things moved with .animate or turned into another shape: check where they END UP, against where
-        # everything else ends up, and shift the end spot if it would land on top of something
-        try:
-            moving = {}
-            for a in anims:
-                m = getattr(a, "mobject", None)
-                if m is None or isinstance(a, FadeOut):
-                    continue
-                if isinstance(a, MoveToTarget) and getattr(m, "target", None) is not None:
-                    moving[id(m)] = (m, m.target)
-                else:
-                    t = getattr(a, "target_mobject", None)
-                    if t is not None and t is not m and not self._is_text(t) and not self._is_connector(t):
-                        moving[id(m)] = (m, t)
-            if not moving:
-                return
-            finals, seen = [], set()
-            for o in self.mobjects:
-                if self._is_connector(o) or o is self._title:
-                    continue
-                for p in self._parts(o):
-                    finals.append((p, moving[id(p)][1] if id(p) in moving else p))
-                    seen.add(id(p))
-            for k, (m, t) in moving.items():
-                if k not in seen:
-                    finals.append((m, t))
-            for m, t in list(moving.values()):
-                if self._is_highlight(m) or self._is_connector(m):
-                    continue
-                fam = {id(x) for x in m.get_family()}
-                others = []
-                for p2, t2 in finals:
-                    if id(p2) in fam or id(m) in {id(x) for x in p2.get_family()}:
-                        continue
-                    if self._is_text(t2) and self._is_text(t):
-                        others.append(t2)
-                    elif not ((self._contains(t2, t) and t2.width * t2.height > 1.6 * t.width * t.height) or
-                              (self._contains(t, t2) and t.width * t.height > 1.6 * t2.width * t2.height)):
-                        others.append(t2)
-                self._nudge(t, others, self.GAP if self._is_text(t) else self.SHAPE_GAP)
-        except Exception:
-            pass
-
-    def add(self, *mobs):
-        # things added without an animation get the same layout pass (play() adds its own mobjects; skip those)
-        if not getattr(self, "_in_play", False) and hasattr(self, "_notes"):
-            class _Added:
-                def __init__(self, m):
-                    self.mobject = m
-            self._tidy([_Added(m) for m in mobs if m not in self.mobjects])
-        return super().add(*mobs)
-
-    def play(self, *anims, **kw):
-        anims = [prepare_animation(a) for a in anims]
-        self._tidy(anims)
-        self._settle_moves(anims)
-        self._in_play = True
-        try:
-            return super().play(*anims, **kw)
-        finally:
-            self._in_play = False
-"""
-
-
-def clean_code(code: str) -> str:
-    code = code.strip()
-    m = re.search(r"```(?:python)?\s*(.*?)```", code, re.S)
-    if m:
-        code = m.group(1)
-    code = re.sub(r"^\s*from manim import \*\s*$", "", code, flags=re.M)
-    code = re.sub(r"class (Scene\d+)\(\s*Scene\s*\)", r"class \1(LernoScene)", code)
-    return "from manim import *\n" + LERNO_BASE + "\n" + code
+            kind, out = "bullets", {"kind": "bullets"}
+    elif kind == "equation":
+        out["lines"] = [_short(x, 80) for x in (v.get("lines") or []) if str(x).strip()][:4] or [title]
+    elif kind == "compare":
+        for side in ("left", "right"):
+            c = v.get(side) if isinstance(v.get(side), dict) else {}
+            out[side] = {"title": _short(c.get("title"), 22), "points": [_short(p, 32) for p in (c.get("points") or [])][:4]}
+    if out["kind"] == "bullets":
+        pts = [_short(p, 44) for p in (v.get("points") or []) if str(p).strip()][:4]
+        if not pts:
+            pts = [_short(s_, 44) for s_ in re.split(r"(?<=[.!?])\s+", narration) if s_.strip()][:4]
+        out["points"] = pts or [title]
+    steps = [s_ for s_ in (d.get("steps") or []) if isinstance(s_, dict) and s_.get("op")][:10]
+    return {"title": _short(title, 44), "visual": out, "steps": steps, "takeaway": _short(d.get("takeaway"), 60),
+            "duration": narration_seconds(narration)}
 
 
 # ----------------------------------------------------------------------------- jobs
@@ -690,21 +426,24 @@ def update(job_id: str, **kw):
 
 def build_scene(job_id: str, plan: dict, i: int, s: dict, key: str | None) -> dict:
     n, total = i + 1, len(plan["scenes"])
-    cls = f"Scene{n}"
+    d = {}
     try:
-        d = {}
         for _ in range(2):  # one retry if the reply can't be parsed
-            raw = ask(SCENE.format(topic=plan["topic"], audience=plan["audience"], n=n, total=total,
-                                   title=s["title"], idea=s["idea"]), key, max_tokens=6000)
-            d = split_scene(raw)
-            if d.get("code"):
+            try:
+                d = ask_json(SCENE.format(topic=plan["topic"], audience=plan["audience"], n=n, total=total,
+                                          title=s["title"], idea=s["idea"]), key, max_tokens=3000)
+            except (FreeQuota, BadKey, NeedKey):
+                raise
+            except Exception as e:
+                print(f"scene {n} reply unusable: {e}", flush=True)
+                d = {}
+            if d.get("visual"):
                 break
     except FreeQuota:
         raise
     except Exception as e:
         print(f"scene {n} generation failed: {e}", flush=True)
-        d = {}
-    narration = d.get("narration") or s["idea"]
+    narration = str(d.get("narration") or s["idea"])
     choices = [str(c) for c in (d.get("choices") or [])][:4]
     if len(choices) < 2:
         choices = ["I understand this part", "I need to see it again"]
@@ -720,21 +459,16 @@ def build_scene(job_id: str, plan: dict, i: int, s: dict, key: str | None) -> di
         "video_url": None,
     }
 
-    out = MEDIA / job_id / f"{cls}.mp4"
-    code = clean_code(d.get("code", "")) if d.get("code") else None
-    ok, err = (False, "no code") if not code else render(code, cls, out)
-    tries = 0
-    while not ok and code and tries < FIX_ATTEMPTS:
-        tries += 1
-        try:
-            code = clean_code(ask(FIX.format(code=code, error=err, cls=cls), key, temperature=0.3, max_tokens=6000))
-            ok, err = render(code, cls, out)
-        except Exception as e:
-            err = str(e)
+    out = MEDIA / job_id / f"Scene{n}.mp4"
+    spec = normalize_spec(d, s["title"], narration)
+    ok, err = render(spec_code(spec), out)
+    if not ok:  # the engine survives bad steps; this is for anything else: drop the steps, then go plain
+        print(f"scene {n} render failed: {err[-600:]}", flush=True)
+        ok, err = render(spec_code({**spec, "steps": []}), out)
     if not ok:
-        ok, _ = render(safe_scene(n, s["title"], narration), cls, out)
+        ok, _ = render(safe_scene(n, s["title"], narration), out)
     if ok:
-        scene["video_url"] = f"/media/{job_id}/{cls}.mp4"
+        scene["video_url"] = f"/media/{job_id}/Scene{n}.mp4"
     with jobs_lock:
         jobs[job_id]["done_scenes"] += 1
         done = jobs[job_id]["done_scenes"]
